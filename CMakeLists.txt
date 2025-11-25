@@ -17,6 +17,10 @@ file(GLOB_RECURSE SERVER_SRCS
 
 add_executable(PsyServer ${SERVER_SRCS})
 
+target_compile_definitions(PsyServer PRIVATE 
+    PROJECT_ROOT_PATH="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 # 链接 Qt 库
 target_link_libraries(PsyServer PRIVATE 
     Qt6::Core 

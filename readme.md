@@ -13,7 +13,7 @@
 ## 📂 目录结构
 PsyServer/
 
-├── config/             # 配置文件 (数据库账号密码, 端口)
+├── config/             # 配置文件
 
 ├── src/
 
@@ -38,29 +38,13 @@ PsyServer/
 ## 🔨 构建与运行
 ### 1. 数据库配置
 确保 MySQL 服务已启动。
-### 2. 修改配置
-编辑 config/serverConfig.json（如果没有请创建），填入您的环境信息：
-
-{
-    
-    "port": 12345,
-    
-    "db_host": "127.0.0.1",
-    
-    "db_name": "PsyDB",
-    
-    "db_user": "你的用户名",
-    
-    "db_pass": "你的密码"
-
-}
-### 3. 编译
+### 2. 编译
 mkdir build && cd build
 
 cmake ..
 
 cmake --build .
-### 4. 运行
+### 3. 运行
 ./PsyServer
 
 ## ⚠️ 注意事项

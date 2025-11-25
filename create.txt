@@ -7,7 +7,7 @@
 PsyServer/
 ├── CMakeLists.txt                  # 项目构建文件
 ├── config/
-│   └── serverConfig.json          # 配置文件（监听端口、MySQL IP、账号、密码）
+│   └── serverConfig.json          # 配置文件
 ├── src/
 │   ├── main.cpp                    # 程序入口：加载配置 -> 连接数据库 -> 启动监听
 │   ├── core/                       # 核心组件
@@ -40,7 +40,7 @@ src/core/ServerApp.cpp:
 src/logic/BookingHandler.cpp:
 功能: 实现复杂的预约状态机。
 学生修改预约: 接收请求 -> 调用 ScheduleDao 查医生新时间是否空闲 -> 若空闲调用 AppointmentDao 更新 -> 返回成功。
-医生修改预约: 接收请求 -> 调用 AppointmentDao 将状态改为 PENDING_STUDENT_CONFIRM -> 记录新时间 -> 调用 ServerApp 查找学生 Socket -> 推送通知。
+医生修改预约: 接收请求 -> 调用 AppointmentDao 将状态改为 PENDING_STUDENT_CONFIRM -> 记录新时间 -> 调用 ServerApp 查找学生 Socket -> 推送通知。(需学生同意才可)
 
 src/logic/AdminHandler.cpp:
 功能: 响应管理员的“导出表”请求。
