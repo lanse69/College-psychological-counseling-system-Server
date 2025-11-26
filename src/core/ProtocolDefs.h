@@ -3,7 +3,7 @@
 #include <QtGlobal>
 #include <QString>
 
-// 定义包头长度为 4 字节 (quint32)
+// 定义包头长度(quint32)
 static const qint64 PACKET_HEAD_SIZE = sizeof(quint32); 
 
 static const int MAX_PACKET_SIZE = 10 * 1024 * 1024; // 最大允许包大小10MB

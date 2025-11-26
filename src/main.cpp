@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include <QDir>
+
 #include "core/ConfigManager.h"
 #include "dao/DBManager.h"
 #include "network/TcpListener.h"
@@ -17,16 +18,16 @@ int main(int argc, char *argv[]) {
     qDebug() << "Looking for config at:" << configPath;
 
     if (!QFile::exists(configPath)) {
-        qCritical() << "Step A Failed: Config file not found!";
+        qCritical() << "Failed: Config file not found!";
         qCritical() << "Current Project Root is:" << PROJECT_ROOT_PATH;
         return -1;
     }
 
     if (!ConfigManager::instance().loadConfig(configPath)) {
-        qCritical() << "Step A Failed: Unable to load configuration json.";
+        qCritical() << "Failed: Unable to load configuration json.";
         return -1;
     }
-    qDebug() << "Step A Success: Configuration loaded.";
+    qDebug() << "Success: Configuration loaded.";
 
     // 连接数据库 & 创建库
     if (!DBManager::instance().connectToDatabase()) {
@@ -34,19 +35,19 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // 步骤 E: 自动建表
+    // 自动建表
     if (!DBManager::instance().initTables()) {
-        qCritical() << "Step E Failed: Table creation failed. Exiting.";
+        qCritical() << "Failed: Table creation failed. Exiting.";
         return -1;
     }
-    qDebug() << "Step E Success: Tables initialized.";
+    qDebug() << "Success: Tables initialized.";
 
     // 启动网络监听
     TcpListener server;
     int port = ConfigManager::instance().net().listenPort;
     
     // TcpListener 支持 maxConnections 设置
-    // server.setMaxPendingConnections(ConfigManager::instance().net().maxConnections);
+    server.setMaxPendingConnections(ConfigManager::instance().net().maxConnections);
 
     if (!server.start(port)) {
         return -1;

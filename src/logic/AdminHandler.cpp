@@ -1,9 +1,11 @@
 #include "AdminHandler.h"
+
+#include <QtConcurrent>
+#include <QJsonArray>
+
 #include "dao/DBManager.h"
 #include "network/ClientSocket.h"
 #include "core/ProtocolDefs.h"
-#include <QtConcurrent>
-#include <QJsonArray>
 
 void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& req) {
     // 获取 Socket 指针
@@ -25,8 +27,41 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
             QSqlQuery query(db);
             
             // 根据类型进行查询
-            // if (statType == "") {}
-            // else {} // 其他类型
+            if (statType == "consult_trend") {
+                // 统计每天/每月的咨询人数]
+                QString sql = R"(
+                    SELECT to_char(date, 'YYYY-MM') as month, COUNT(*) 
+                    FROM appointments 
+                    WHERE status = 2
+                    GROUP BY month 
+                    ORDER BY month DESC LIMIT 12
+                )";
+                if (query.exec(sql)) {
+                    while(query.next()) {
+                        QJsonObject item;
+                        item["label"] = query.value(0).toString();
+                        item["value"] = query.value(1).toInt();
+                        resultMap.append(item);
+                    }
+                }
+            }
+        } else if (statType == "common_issues") {
+            // 统计咨询记录中的 tag
+            // TODO: 改为 string_to_array + unnest
+            QString sql = R"(
+                SELECT result_tags, COUNT(*) 
+                FROM consultation_records 
+                GROUP BY result_tags 
+                ORDER BY count DESC LIMIT 10
+            )";
+            if (query.exec(sql)) {
+                while(query.next()) {
+                    QJsonObject item;
+                    item["label"] = query.value(0).toString(); // tag
+                    item["value"] = query.value(1).toInt();
+                    resultMap.append(item);
+                }
+            }
         }
 
         // 关闭独立连接

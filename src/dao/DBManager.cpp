@@ -1,7 +1,9 @@
 #include "DBManager.h"
-#include "core/ConfigManager.h"
+
 #include <QCryptographicHash>
-#include <QCoreApplication>
+// #include <QCoreApplication>
+
+#include "core/ConfigManager.h"
 
 DBManager& DBManager::instance() {
     static DBManager instance;
@@ -127,7 +129,7 @@ void DBManager::closeThreadConnection(const QString &connectionName) {
 bool DBManager::initTables() {
     bool success = true;
 
-    // 1. 用户表 (users)
+    // 用户表 (users)
     // role: 1=Student, 2=Doctor, 3=Admin
     success &= createTable("users", R"(
         CREATE TABLE IF NOT EXISTS users (
@@ -142,7 +144,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 2. 医生信息表 (doctor_info)
+    // 医生信息表 (doctor_info)
     // 扩展 users 表，存储医生特有信息
     success &= createTable("doctor_info", R"(
         CREATE TABLE IF NOT EXISTS doctor_info (
@@ -154,7 +156,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 3. 医生排班表 (schedules)
+    // 医生排班表 (schedules)
     // time_slot_flags: 使用位掩码或简单的 0/1 字符串表示一天中哪些时间段有空
     // 比如: INT 类型，二进制 00001111 表示前4个时间段空闲
     success &= createTable("schedules", R"(
@@ -169,7 +171,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 4. 预约记录表 (appointments)
+    // 预约记录表 (appointments)
     // status: 0=Pending, 1=Confirmed, 2=Completed, 3=Cancelled
     success &= createTable("appointments", R"(
         CREATE TABLE IF NOT EXISTS appointments (
@@ -186,7 +188,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 5. 问卷模板表 (surveys)
+    // 问卷模板表 (surveys)
     // content_json: 存储题目数组 eg：[{"q":"最近睡眠如何?", "options":["好","坏"]}]
     success &= createTable("surveys", R"(
         CREATE TABLE IF NOT EXISTS surveys (
@@ -199,7 +201,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 6. 问卷回答表 (survey_answers)
+    // 问卷回答表 (survey_answers)
     // answers_json: 存储学生提交的答案
     success &= createTable("survey_answers", R"(
         CREATE TABLE IF NOT EXISTS survey_answers (
@@ -213,7 +215,7 @@ bool DBManager::initTables() {
         );
     )");
 
-    // 7. 咨询记录/报告表 (consultation_records)
+    // 咨询记录/报告表 (consultation_records)
     // tags: 用于统计 "最常遇到的心理问题"
     success &= createTable("consultation_records", R"(
         CREATE TABLE IF NOT EXISTS consultation_records (

@@ -1,4 +1,5 @@
 #include "ConfigManager.h"
+
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -32,10 +33,10 @@ bool ConfigManager::loadConfig(const QString &filePath) {
     if (root.contains("database")) {
         QJsonObject dbObj = root["database"].toObject();
         m_dbConfig.host = dbObj["host"].toString("127.0.0.1");
-        m_dbConfig.port = dbObj["port"].toInt(3306);
-        m_dbConfig.username = dbObj["username"].toString("root");
-        m_dbConfig.password = dbObj["password"].toString("");
-        m_dbConfig.dbName = dbObj["db_name"].toString("psy_db");
+        m_dbConfig.port = dbObj["port"].toInt(5432);
+        m_dbConfig.username = dbObj["username"].toString("PsyServer");
+        m_dbConfig.password = dbObj["password"].toString("PsyDB@Of@PostgreSQL");
+        m_dbConfig.dbName = dbObj["db_name"].toString("PsyDB");
     } else {
         qCritical() << "Config missing 'database' node";
         return false;

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QMutex>
+
 #include "network/ClientSocket.h"
 
 class ServerApp : public QObject {

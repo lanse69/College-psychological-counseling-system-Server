@@ -1,7 +1,12 @@
 #include "RequestRouter.h"
+
+#include <QDebug>
+
 #include "AuthHandler.h"
 #include "BookingHandler.h"
 #include "AdminHandler.h"
+#include "DoctorHandler.h"
+#include "SurveyHandler.h"
 #include "core/ProtocolDefs.h" 
 
 RequestRouter& RequestRouter::instance() {
@@ -15,16 +20,40 @@ void RequestRouter::dispatch(ClientSocket* sender, const QJsonObject& request) {
     int cmdVal = request[JsonKeys::CMD].toInt();
     CmdType cmd = static_cast<CmdType>(cmdVal);
 
+    qDebug() << "Dispatching CMD:" << cmdVal << "from User:" << sender->userId();
+
     switch (cmd) {
+        // 认证相关
         case CmdType::LOGIN:
             AuthHandler::handleLogin(sender, request);
             break;
+            
+        // 预约核心业务
         case CmdType::CREATE_BOOKING:
             BookingHandler::handleCreateBooking(sender, request);
             break;
-        case CmdType::MODIFY_BOOKING_REQ: // 医生发起修改请求
+        case CmdType::CANCEL_BOOKING:
+            BookingHandler::handleCancelBooking(sender, request);
+            break;
+        case CmdType::GET_MY_BOOKINGS:
+            BookingHandler::handleGetMyBookings(sender, request);
+            break;
+            
+        // 预约修改
+        case CmdType::MODIFY_BOOKING_DIRECT: 
+            // 学生直接修改
+            BookingHandler::handleModifyBookingDirect(sender, request);
+            break;
+        case CmdType::MODIFY_BOOKING_REQ:    
+            // 医生发起修改请求
             BookingHandler::handleModifyRequest(sender, request);
             break;
+        case CmdType::MODIFY_BOOKING_REPLY:  
+            // 学生回复医生的请求
+            BookingHandler::handleModifyReply(sender, request);
+            break;
+
+        // 管理员业务
         case CmdType::ADMIN_ADD_USER:
             AdminHandler::handleAddUser(sender, request);
             break;
@@ -32,15 +61,15 @@ void RequestRouter::dispatch(ClientSocket* sender, const QJsonObject& request) {
             AdminHandler::handleDeleteUser(sender, request);
             break;
         case CmdType::GET_STATISTICS:
-            // 这里调用支持多线程的统计接口
             AdminHandler::handleGetStatistics(sender, request);
             break;
 
-        // other case
-        
+        // 医生排班与信息
+        // TODO
+        // 补充 DoctorHandler::handleUpdateSchedule 等
+            
         default:
-            // 处理未知指令
-            qWarning() << "Unknown command:" << cmd;
+            qWarning() << "Unknown or Unhandled command:" << cmdVal;
             break;
     }
 }

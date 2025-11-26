@@ -1,7 +1,9 @@
 #include "TcpListener.h"
+
+#include <QDebug>
+
 #include "logic/RequestRouter.h" // 引入路由
 #include "core/ServerApp.h"      // 引入全局状态
-#include <QDebug>
 
 TcpListener::TcpListener(QObject *parent) : QTcpServer(parent) {}
 
@@ -27,10 +29,12 @@ void TcpListener::incomingConnection(qintptr socketDescriptor) {
 }
 
 void TcpListener::onClientJsonReceived(ClientSocket* sender, const QJsonObject& json) {
-    qDebug() << "Received from client" << sender << ":" << json;
-    // TODO
-    // 将请求转交给路由处理
-    // RequestRouter 也可以是单例，或者静态方法类
+    // 安全检查
+    if (!sender) {
+        qWarning() << "[TcpListener] Error: Received signal from null sender.";
+        return;
+    }
+    
     RequestRouter::instance().dispatch(sender, json);
 }
 

@@ -1,6 +1,8 @@
 #include "ClientSocket.h"
-#include "core/ProtocolDefs.h" // 引用协议定义
+
 #include <QDebug>
+
+#include "core/ProtocolDefs.h" // 引用协议定义
 
 int ClientSocket::userId() const { 
     return m_userId; 
