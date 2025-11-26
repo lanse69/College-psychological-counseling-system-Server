@@ -2,6 +2,14 @@
 #include "core/ProtocolDefs.h" // 引用协议定义
 #include <QDebug>
 
+int ClientSocket::userId() const { 
+    return m_userId; 
+}
+
+void ClientSocket::setUserId(int id) { 
+    m_userId = id; 
+}
+
 ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent) 
     : QObject(parent) 
 {
@@ -33,9 +41,9 @@ void ClientSocket::sendJson(const QJsonObject &json) {
     QDataStream out(&packet, QIODevice::WriteOnly);
     out.setVersion(QDataStream::Qt_6_0);
     
-    // 1. 写入长度 (quint32)
+    // 写入长度 (quint32)
     out << (quint32)jsonData.size();
-    // 2. 写入数据
+    // 写入数据
     packet.append(jsonData);
 
     m_socket->write(packet);
@@ -46,29 +54,29 @@ void ClientSocket::onReadyRead() {
     m_buffer.append(m_socket->readAll());
 
     while (true) {
-        // 1. 检查是否有完整的包头
+        // 检查是否有完整的包头
         if (m_buffer.size() < PACKET_HEAD_SIZE) {
             return; // 数据不够，等待下一次 readyRead
         }
 
-        // 2. 读取包体长度 (使用 QDataStream 处理大小端)
+        // 读取包体长度 (使用 QDataStream 处理大小端)
         QDataStream stream(m_buffer);
         stream.setVersion(QDataStream::Qt_6_0);
         quint32 packetSize = 0;
         stream >> packetSize;
 
-        // 3. 检查是否有完整的包体
+        // 检查是否有完整的包体
         if (m_buffer.size() < PACKET_HEAD_SIZE + packetSize) {
             return; // 数据不够，等待
         }
 
-        // 4. 提取包体数据
+        // 提取包体数据
         QByteArray data = m_buffer.mid(PACKET_HEAD_SIZE, packetSize);
         
-        // 5. 从缓冲区移除已处理的数据
+        // 从缓冲区移除已处理的数据
         m_buffer.remove(0, PACKET_HEAD_SIZE + packetSize);
 
-        // 6. 解析 JSON
+        // 解析 JSON
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
         if (parseError.error == QJsonParseError::NoError && doc.isObject()) {

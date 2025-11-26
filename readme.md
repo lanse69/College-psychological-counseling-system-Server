@@ -6,7 +6,7 @@
 ## ✨ 核心功能
 *   **TCP 连接池:** 使用 `QTcpServer` 管理多用户并发连接。
 *   **JSON 协议路由:** 严格定义 JSON 格式，解析请求 (Login, Booking, Survey) 并分发至对应逻辑层。
-*   **数据库管理:** 封装 `QtSql` 操作 MySQL (用户表, 预约表, 医生排班表)。
+*   **数据库管理:** 封装 `QtSql` 操作 PostgreSQL (用户表, 预约表, 医生排班表)。
 *   **消息推送:** 实现实时通知机制（如医生取消预约时，即时或离线通知学生）。
 *   **统计分析:** 为管理员提供聚合查询数据（如 `GROUP BY` 统计）。
 
@@ -32,12 +32,14 @@ PsyServer/
 ## ⚙️ 环境要求
 - C++ 编译器 (支持 C++17)
 - Qt 6 SDK (Core, Network, Sql 模块)
-- MySQL Server (8.0 或更高版本)
+- PostGreSQL Server
 - CMake (3.16+)
 
 ## 🔨 构建与运行
 ### 1. 数据库配置
-确保 MySQL 服务已启动。
+确保 PostGreSQL 服务已启动。
+
+并将PostGreSQL相关信息写入config文件夹下的serverConfig.json文件中
 ### 2. 编译
 mkdir build && cd build
 

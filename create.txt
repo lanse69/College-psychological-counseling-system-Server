@@ -23,7 +23,7 @@ PsyServer/
 │   │   ├── DoctorHandler.h/cpp     # 处理医生排班修改、个人信息修改
 │   │   ├── SurveyHandler.h/cpp     # 处理问卷的上传、下发、答案提交
 │   │   └── AdminHandler.h/cpp      # 处理管理员的数据导出请求（SQL 聚合查询）
-│   └── dao/                        # 数据访问层 (Data Access Object)，直接操作 MySQL
+│   └── dao/                        # 数据访问层 (Data Access Object)，直接操作 PostGreSQL
 │       ├── DBManager.h/cpp         # 创建数据库、表，数据库连接池管理
 │       ├── UserDao.h/cpp           # 表操作：users (增删改查)
 │       ├── ScheduleDao.h/cpp       # 表操作：doctorSchedules (排班表)

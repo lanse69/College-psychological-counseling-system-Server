@@ -12,8 +12,8 @@ public:
     explicit ClientSocket(qintptr socketDescriptor, QObject *parent = nullptr);
     ~ClientSocket();
 
-    int userId() const { return m_userId; }
-    void setUserId(int id) { m_userId = id; }
+    int userId();
+    void setUserId(int id);
     
     // 发送 JSON 数据给客户端
     void sendJson(const QJsonObject &json);

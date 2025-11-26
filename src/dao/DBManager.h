@@ -6,20 +6,31 @@
 #include <QSqlQuery>
 #include <QDebug>
 #include <QMutex>
+#include <QUuid>
 
 class DBManager {
 public:
-    // 单例获取
     static DBManager& instance();
 
-    // 初始化数据库连接
+    // 初始化主线程数据库连接
     bool connectToDatabase();
-
-    // 创建所有表
     bool initTables();
 
-    // 获取数据库对象
-    QSqlDatabase getDatabase() const;
+    // 获取主线程的连接 (用于普通的快速操作，如登录、简单查询)
+    QSqlDatabase getMainDatabase() const;
+    
+    /**
+     * @brief 为当前线程创建一个新的、独立的数据库连接
+     * @param connectionName [输出参数] 返回生成的唯一连接名，用于后续清理
+     * @return 打开的数据库对象
+     */
+    QSqlDatabase openThreadConnection(QString &connectionName);
+
+    /**
+     * @brief 关闭并移除线程的临时连接
+     * @param connectionName openThreadConnection 返回的名字
+     */
+    void closeThreadConnection(const QString &connectionName);
 
 private:
     DBManager();
@@ -28,8 +39,8 @@ private:
     DBManager& operator=(const DBManager&) = delete;
 
     bool createTable(const QString &tableName, const QString &sql);
-    void seedDefaultAdmin(); // 预置管理员
+    void seedDefaultAdmin();
 
-    QSqlDatabase m_db;
+    QSqlDatabase m_mainDb; // 主线程连接对象
     QString m_dbName;
 };
