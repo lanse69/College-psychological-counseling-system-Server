@@ -86,7 +86,7 @@ sudo ufw status
 ```JSON
 {
     "database": {
-        "host": "127.0.0.1",  // 服务端连接本地数据库
+        "host": "127.0.0.1",
         "port": 5432,
         "username": "PsyServer",
         "password": "PsyDB@Of@PostgreSQL",

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QString>
-#include <QJsonObject>
 
 struct DBConfig {
     QString host;
@@ -23,8 +22,8 @@ public:
     // 加载配置文件
     bool loadConfig(const QString &filePath);
 
-    const DBConfig& db() const { return m_dbConfig; }
-    const NetworkConfig& net() const { return m_netConfig; }
+    const DBConfig& db() const;
+    const NetworkConfig& net() const;
 
 private:
     ConfigManager() = default;

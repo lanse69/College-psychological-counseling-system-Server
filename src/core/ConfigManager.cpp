@@ -56,3 +56,11 @@ bool ConfigManager::loadConfig(const QString &filePath) {
     qDebug() << "Configuration loaded successfully.";
     return true;
 }
+
+const DBConfig& ConfigManager::db() const {
+    return m_dbConfig;
+}
+
+const NetworkConfig& ConfigManager::net() const {
+    return m_netConfig;
+}
