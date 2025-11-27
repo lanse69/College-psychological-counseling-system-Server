@@ -7,7 +7,8 @@
 #include "AdminHandler.h"
 #include "DoctorHandler.h"
 #include "SurveyHandler.h"
-#include "core/ProtocolDefs.h" 
+#include "core/ProtocolDefs.h"
+#include "network/ClientSocket.h"
 
 RequestRouter& RequestRouter::instance() {
     static RequestRouter instance;

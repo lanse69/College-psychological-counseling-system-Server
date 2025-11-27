@@ -21,6 +21,7 @@ public:
 
 private:
     ServerApp() = default;
+
     QMap<int, ClientSocket*> m_onlineUsers;
     QMutex m_mutex;
 };

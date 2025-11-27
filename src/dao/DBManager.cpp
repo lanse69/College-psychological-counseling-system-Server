@@ -49,17 +49,18 @@ bool DBManager::connectToDatabase() {
         tempDb.setDatabaseName("postgres");
 
         if (tempDb.open()) {
-            QSqlQuery query(tempDb);
-            query.prepare("SELECT 1 FROM pg_database WHERE datname = ?");
-            query.addBindValue(config.dbName);
-            if (query.exec() && query.next()) {
-            } else {
-                // 数据库不存在，创建它
-                qDebug() << "Creating database:" << config.dbName;
-                if (!query.exec(QString("CREATE DATABASE \"%1\"").arg(config.dbName))) {
-                     qCritical() << "Failed to create database:" << query.lastError().text();
+            {
+                QSqlQuery query(tempDb);
+                query.prepare("SELECT 1 FROM pg_database WHERE datname = ?");
+                query.addBindValue(config.dbName);
+                if (!(query.exec() && query.next())) {
+                    // 数据库不存在，创建它
+                    qDebug() << "Creating database:" << config.dbName;
+                    if (!query.exec(QString("CREATE DATABASE \"%1\"").arg(config.dbName))) {
+                        qCritical() << "Failed to create database:" << query.lastError().text();
+                    }
                 }
-            }
+            } // 销毁query对象, 方便后面安全关闭连接
             tempDb.close();
         } else {
             qCritical() << "Failed to connect to Postgres server (db=postgres):" << tempDb.lastError().text();

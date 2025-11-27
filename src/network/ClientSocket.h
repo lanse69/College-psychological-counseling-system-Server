@@ -12,7 +12,7 @@ public:
     explicit ClientSocket(qintptr socketDescriptor, QObject *parent = nullptr);
     ~ClientSocket();
 
-    int userId();
+    int userId() const;
     void setUserId(int id);
     
     // 发送 JSON 数据给客户端
@@ -30,5 +30,5 @@ private slots:
 private:
     QTcpSocket *m_socket;
     QByteArray m_buffer; // 接收缓冲区
-    int m_userId = -1;   // 关联的用户ID (登录后设置)
+    int m_userId;   // 关联的用户ID (登录后设置)
 };

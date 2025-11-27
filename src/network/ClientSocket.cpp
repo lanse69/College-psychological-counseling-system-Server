@@ -4,7 +4,7 @@
 
 #include "core/ProtocolDefs.h" // 引用协议定义
 
-int ClientSocket::userId() const { 
+int ClientSocket::userId() const {
     return m_userId; 
 }
 
@@ -12,8 +12,8 @@ void ClientSocket::setUserId(int id) {
     m_userId = id; 
 }
 
-ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent) 
-    : QObject(parent) 
+ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
+    : QObject(parent), m_userId{-1}
 {
     m_socket = new QTcpSocket(this);
     if (!m_socket->setSocketDescriptor(socketDescriptor)) {
