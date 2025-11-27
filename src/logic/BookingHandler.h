@@ -14,7 +14,7 @@ public:
     // 获取我的预约
     static void handleGetMyBookings(ClientSocket* sender, const QJsonObject& request);
     
-    // 取消预约 (如果是医生取消，需要推送通知给学生)
+    // 取消预约 (医生取消需要推送通知给学生)
     static void handleCancelBooking(ClientSocket* sender, const QJsonObject& request);
 
     // 学生修改预约 (服务端校验医生时间表，无需医生人工同意)

@@ -46,7 +46,7 @@ int main(int argc, char *argv[]) {
     TcpListener server;
     int port = ConfigManager::instance().net().listenPort;
     
-    // TcpListener 支持 maxConnections 设置
+    // 设置 maxConnections
     server.setMaxPendingConnections(ConfigManager::instance().net().maxConnections);
 
     if (!server.start(port)) {

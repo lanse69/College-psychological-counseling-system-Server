@@ -8,7 +8,7 @@ static const qint64 PACKET_HEAD_SIZE = sizeof(quint32);
 
 static const int MAX_PACKET_SIZE = 10 * 1024 * 1024; // 最大允许包大小10MB
 
-// 1. 通信指令类型 (Command Type)
+// 通信指令类型 (Command Type)
 enum class CmdType {
     // 基础 & 认证
     LOGIN = 1000,           // 登录
@@ -21,6 +21,7 @@ enum class CmdType {
     UPDATE_USER_INFO,       // 修改个人信息
     ADMIN_ADD_USER,         // 管理员添加用户 (学生/医生)
     ADMIN_DEL_USER,         // 管理员删除用户
+    ADMIN_GET_USER_LIST = 1010, // 管理员获取用户列表
     GET_DOCTOR_LIST,        // 获取医生列表 (含筛选)
     GET_DOCTOR_DETAIL,      // 获取医生详细信息
 
@@ -54,14 +55,14 @@ enum class CmdType {
     PUSH_NOTIFICATION = 9000 // 服务端主动推消息 (如: 预约被取消、收到修改请求)
 };
 
-// 2. 角色定义 (Role)
+// 角色定义 (Role)
 enum class UserRole {
     STUDENT = 1,
     DOCTOR = 2,
     ADMIN = 3
 };
 
-// 3. 预约状态 (Appointment Status)
+// 预约状态 (Appointment Status)
 enum class ApptStatus {
     PENDING = 0,            // 待生效 (如需审核)
     CONFIRMED = 1,          // 已确认/即将开始
@@ -70,7 +71,7 @@ enum class ApptStatus {
     PENDING_CHANGE_CONFIRM  // 待学生确认变更 (医生发起了修改请求)
 };
 
-// 4. JSON 键名常量 (Key Constants)
+// JSON 键名常量 (Key Constants)
 namespace JsonKeys {
     const QString CMD       = "cmd";        // 指令类型 (int)
     const QString DATA      = "data";       // 数据主体 (object)
@@ -83,10 +84,14 @@ namespace JsonKeys {
     const QString ROLE      = "role";
     const QString USERNAME  = "username";
     const QString PASSWORD  = "password";
+    const QString REAL_NAME = "realName";
+    const QString INTRO     = "intro";       // 医生简介
+    const QString SPEC      = "spec";        // 擅长领域 (Specialized Field)
+    const QString TARGET_ID = "targetId";    // 要删除的目标用户ID
     const QString APPT_ID   = "apptId";     // 预约ID
     const QString DOC_ID    = "docId";
     const QString STU_ID    = "stuId";
-    const QString DATE      = "date";       // "2023-10-27"
+    const QString DATE      = "date";       // "2025-11-27"
     const QString TIME_SLOT = "timeSlot";   // "14:00-15:00"
     const QString STAT_TYPE = "statType";   // 报表类型
 }

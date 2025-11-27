@@ -10,7 +10,7 @@ class ServerApp : public QObject {
 public:
     static ServerApp& instance();
 
-    // 注册在线用户 (登录成功后调用)
+    // 注册在线用户
     void registerUser(int userId, ClientSocket* socket);
 
     // 用户下线

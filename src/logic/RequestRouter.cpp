@@ -64,11 +64,16 @@ void RequestRouter::dispatch(ClientSocket* sender, const QJsonObject& request) {
         case CmdType::GET_STATISTICS:
             AdminHandler::handleGetStatistics(sender, request);
             break;
+        case CmdType::ADMIN_GET_USER_LIST:
+            AdminHandler::handleGetUserList(sender, request);
+            break;
 
         // 医生排班与信息
         // TODO
         // 补充 DoctorHandler::handleUpdateSchedule 等
-            
+
+        // else
+
         default:
             qWarning() << "Unknown or Unhandled command:" << cmdVal;
             break;

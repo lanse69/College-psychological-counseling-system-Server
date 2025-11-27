@@ -1,7 +1,6 @@
 #include "DBManager.h"
 
 #include <QCryptographicHash>
-// #include <QCoreApplication>
 
 #include "core/ConfigManager.h"
 
@@ -98,7 +97,7 @@ QSqlDatabase DBManager::openThreadConnection(QString &connectionName) {
     // 添加数据库
     QSqlDatabase db = QSqlDatabase::addDatabase("QPSQL", connectionName);
     
-    // 读取配置 (ConfigManager 是线程安全的单例，只要是只读)
+    // 读取配置
     const DBConfig &config = ConfigManager::instance().db();
     
     db.setHostName(config.host);
@@ -158,8 +157,23 @@ bool DBManager::initTables() {
     )");
 
     // 医生排班表 (schedules)
-    // time_slot_flags: 使用位掩码或简单的 0/1 字符串表示一天中哪些时间段有空
-    // 比如: INT 类型，二进制 00001111 表示前4个时间段空闲
+    /*
+     * 时间段位掩码定义 (Time Slot Bitmask Definitions)
+     * 用于 schedules 表的 time_slot_flags 字段
+     *
+     * 数据类型: 32位整数 (INT / quint32)
+     * 规则: 0 = 空闲, 1 = 忙碌 (已有预约 或 医生设为休息)
+     *
+     * Bit 0 (1 << 0): 08:00 - 09:00
+     * Bit 1 (1 << 1): 09:00 - 10:00
+     * Bit 2 (1 << 2): 10:00 - 11:00
+     * Bit 3 (1 << 3): 11:00 - 12:00
+     * Bit 4 (1 << 4): 13:00 - 14:00
+     * Bit 5 (1 << 5): 14:00 - 15:00
+     * Bit 6 (1 << 6): 15:00 - 16:00
+     * Bit 7 (1 << 7): 16:00 - 17:00
+     * Bit 8 (1 << 8): 17:00 - 18:00
+     */
     success &= createTable("schedules", R"(
         CREATE TABLE IF NOT EXISTS schedules (
             id SERIAL PRIMARY KEY,
@@ -190,7 +204,7 @@ bool DBManager::initTables() {
     )");
 
     // 问卷模板表 (surveys)
-    // content_json: 存储题目数组 eg：[{"q":"最近睡眠如何?", "options":["好","坏"]}]
+    // content_json: 存储题目数组
     success &= createTable("surveys", R"(
         CREATE TABLE IF NOT EXISTS surveys (
             id SERIAL PRIMARY KEY,
@@ -217,7 +231,6 @@ bool DBManager::initTables() {
     )");
 
     // 咨询记录/报告表 (consultation_records)
-    // tags: 用于统计 "最常遇到的心理问题"
     success &= createTable("consultation_records", R"(
         CREATE TABLE IF NOT EXISTS consultation_records (
             id SERIAL PRIMARY KEY,

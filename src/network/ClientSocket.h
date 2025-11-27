@@ -30,5 +30,5 @@ private slots:
 private:
     QTcpSocket *m_socket;
     QByteArray m_buffer; // 接收缓冲区
-    int m_userId;   // 关联的用户ID (登录后设置)
+    int m_userId;   // 关联的用户ID
 };

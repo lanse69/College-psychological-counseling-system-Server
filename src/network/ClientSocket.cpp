@@ -61,7 +61,8 @@ void ClientSocket::onReadyRead() {
             return; // 数据不够，等待下一次 readyRead
         }
 
-        // 读取包体长度 (使用 QDataStream 处理大小端)
+        // 读取包体长度
+        // 用 QDataStream 处理大小端
         QDataStream stream(m_buffer);
         stream.setVersion(QDataStream::Qt_6_0);
         quint32 packetSize = 0;

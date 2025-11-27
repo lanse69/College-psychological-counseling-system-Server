@@ -3,21 +3,186 @@
 #include <QtConcurrent>
 #include <QJsonArray>
 #include <QPointer>
+#include <QCryptographicHash>
+#include <QDebug>
 
+#include "dao/UserDao.h"
 #include "dao/DBManager.h"
 #include "network/ClientSocket.h"
 #include "core/ProtocolDefs.h"
+#include "core/ServerApp.h"
+
+bool AdminHandler::checkAdminPermission(ClientSocket* sender) {
+    if (!sender) return false;
+    int role = UserDao::getUserRole(sender->userId());
+    return role == (int)UserRole::ADMIN;
+}
 
 void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& request) {
+    if (!checkAdminPermission(sender)) {
+        QJsonObject err;
+        err[JsonKeys::CMD] = request[JsonKeys::CMD];
+        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::MSG] = "无权操作";
+        sender->sendJson(err);
+        return;
+    }
 
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    QString username = data[JsonKeys::USERNAME].toString();
+    QString rawPass  = data[JsonKeys::PASSWORD].toString();
+    QString realName = data[JsonKeys::REAL_NAME].toString();
+    int role = data[JsonKeys::ROLE].toInt();
+
+    QJsonObject response;
+    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+
+    // 检查参数
+    if (username.isEmpty() || rawPass.isEmpty()) {
+        response[JsonKeys::CODE] = 400;
+        response[JsonKeys::MSG] = "用户名或密码不能为空";
+        sender->sendJson(response);
+        return;
+    }
+
+    // 检查用户是否存在
+    if (UserDao::isUsernameExist(username)) {
+        response[JsonKeys::CODE] = 409; // Conflict
+        response[JsonKeys::MSG] = "用户名已存在";
+        sender->sendJson(response);
+        return;
+    }
+
+    // 计算 Hash
+    QString passHash = QString(QCryptographicHash::hash(rawPass.toUtf8(), QCryptographicHash::Sha256).toHex());
+
+    // 执行插入
+    int newId = UserDao::addUser(username, passHash, role, realName);
+
+    if (newId != -1) {
+        // 医生需要插入 doctor_info
+        if (role == (int)UserRole::DOCTOR) {
+            QString intro = data[JsonKeys::INTRO].toString();
+            QString spec = data[JsonKeys::SPEC].toString();
+            UserDao::addDoctorInfo(newId, intro, spec);
+        }
+
+        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::MSG] = "添加用户成功";
+    } else {
+        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::MSG] = "数据库插入失败";
+    }
+
+    sender->sendJson(response);
 }
 
 void AdminHandler::handleDeleteUser(ClientSocket* sender, const QJsonObject& request) {
+    if (!checkAdminPermission(sender)) {
+        QJsonObject err;
+        err[JsonKeys::CMD] = request[JsonKeys::CMD];
+        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::MSG] = "无权操作";
+        sender->sendJson(err);
+        return;
+    }
 
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int targetId = data[JsonKeys::TARGET_ID].toInt();
+
+    QJsonObject response;
+    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+
+    if (targetId <= 0) {
+        response[JsonKeys::CODE] = 400;
+        response[JsonKeys::MSG] = "无效的用户ID";
+        sender->sendJson(response);
+        return;
+    }
+
+    // 该用户在线则强制踢下线
+    ClientSocket* targetSocket = ServerApp::instance().getClient(targetId);
+    if (targetSocket) {
+        QJsonObject kickMsg;
+        kickMsg[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+        kickMsg[JsonKeys::MSG] = "管理员删除了您的账号，连接断开。";
+        targetSocket->sendJson(kickMsg);
+        // ServerApp::unregisterUser 会在 socket 断开时自动调用
+        targetSocket->deleteLater();
+    }
+
+    // 删库
+    if (UserDao::deleteUser(targetId)) {
+        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::MSG] = "用户删除成功";
+    } else {
+        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::MSG] = "删除失败，ID可能不存在";
+    }
+
+    sender->sendJson(response);
 }
 
 void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject& request) {
+    if (!checkAdminPermission(sender)) {
+        QJsonObject err;
+        err[JsonKeys::CMD] = request[JsonKeys::CMD];
+        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::MSG] = "无权操作";
+        sender->sendJson(err);
+        return;
+    }
 
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int targetId = data[JsonKeys::TARGET_ID].toInt();
+    QString realName = data[JsonKeys::REAL_NAME].toString();
+    QString rawPass = data[JsonKeys::PASSWORD].toString();
+
+    // 医生特有字段
+    QString intro = data[JsonKeys::INTRO].toString();
+    QString spec = data[JsonKeys::SPEC].toString();
+
+    QJsonObject response;
+    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+
+    // 密码 Hash
+    QString passHash = "";
+    if (!rawPass.isEmpty()) {
+        passHash = QString(QCryptographicHash::hash(rawPass.toUtf8(), QCryptographicHash::Sha256).toHex());
+    }
+
+    // 更新基础表 (users)
+    bool success = UserDao::updateBasicInfo(targetId, realName, passHash);
+
+    // 是医生则更新详情表
+    int targetRole = UserDao::getUserRole(targetId);
+    if (success && targetRole == (int)UserRole::DOCTOR) {
+        success &= UserDao::updateDoctorInfo(targetId, intro, spec);
+    }
+
+    if (success) {
+        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::MSG] = "用户信息更新成功";
+
+        // 通知目标用户
+        ClientSocket* targetClient = ServerApp::instance().getClient(targetId);
+        if (targetClient) {
+            QJsonObject notify;
+            notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+            notify[JsonKeys::MSG] = "您的个人信息已被管理员修改，请刷新查看。";
+            if (!passHash.isEmpty()) {
+                notify[JsonKeys::MSG] = "您的密码已被管理员重置，请重新登录。";
+                targetClient->deleteLater();
+            }
+            targetClient->sendJson(notify);
+        }
+
+    } else {
+        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::MSG] = "更新失败，数据库错误或ID不存在";
+    }
+
+    sender->sendJson(response);
 }
 
 void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& req) {
@@ -75,7 +240,7 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
                         resultMap.append(item);
                     }
                 }
-            }
+            } // else 其他类型查询
 
             // 关闭独立连接
             DBManager::instance().closeThreadConnection(connName);
@@ -88,7 +253,7 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
                 response[JsonKeys::CODE] = 200;
                 response[JsonKeys::DATA] = resultMap;
 
-                // 回到创建 client 的线程 (即主线程) 执行 sendJson
+                // 回到创建 client 的线程执行 sendJson
                 QMetaObject::invokeMethod(
                     safeClient, [safeClient, response]() {
                         safeClient->sendJson(response);
@@ -101,8 +266,22 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
     (void)future;
 }
 
-bool AdminHandler::checkAdminPermission(ClientSocket* sender) {
-    if (!sender) return false;
-    // TODO
-    return true;
+void AdminHandler::handleGetUserList(ClientSocket* sender, const QJsonObject& request) {
+    if (!checkAdminPermission(sender)) {
+        QJsonObject err;
+        err[JsonKeys::CMD] = request[JsonKeys::CMD];
+        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::MSG] = "无权操作";
+        sender->sendJson(err);
+        return;
+    }
+
+    QJsonArray userList = UserDao::getAllUsers(sender->userId());
+
+    QJsonObject response;
+    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+    response[JsonKeys::CODE] = 200;
+    response[JsonKeys::DATA] = userList;
+
+    sender->sendJson(response);
 }

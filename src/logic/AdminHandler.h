@@ -37,12 +37,13 @@ public:
      */
     static void handleGetStatistics(ClientSocket* sender, const QJsonObject& request);
 
+    static void handleGetUserList(ClientSocket* sender, const QJsonObject& request);
+
 private:
     AdminHandler() = default;
 
     /**
      * @brief 辅助函数：校验发送者是否具有管理员权限
-     * 防止普通用户伪造 JSON 包调用管理员接口
      */
     static bool checkAdminPermission(ClientSocket* sender);
 };
