@@ -31,7 +31,7 @@ void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) 
         // 注册到全局在线列表
         ServerApp::instance().registerUser(user.id, sender);
 
-        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
         response[JsonKeys::MSG] = "登录成功";
         
         QJsonObject respData;
@@ -44,7 +44,7 @@ void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) 
     } else {
         // 登录失败
         qWarning() << "用户登录失败:" << username;
-        response[JsonKeys::CODE] = 401;
+        response[JsonKeys::CODE] = (int)StatusCode::UNAUTHORIZED;
         response[JsonKeys::MSG] = "无效用户名或密码";
     }
 

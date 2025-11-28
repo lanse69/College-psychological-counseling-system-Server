@@ -22,7 +22,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
     if (!checkAdminPermission(sender)) {
         QJsonObject err;
         err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
         err[JsonKeys::MSG] = "无权操作";
         sender->sendJson(err);
         return;
@@ -39,7 +39,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
 
     // 检查参数
     if (username.isEmpty() || rawPass.isEmpty()) {
-        response[JsonKeys::CODE] = 400;
+        response[JsonKeys::CODE] = (int)StatusCode::BAD_REQUEST;
         response[JsonKeys::MSG] = "用户名或密码不能为空";
         sender->sendJson(response);
         return;
@@ -47,7 +47,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
 
     // 检查用户是否存在
     if (UserDao::isUsernameExist(username)) {
-        response[JsonKeys::CODE] = 409; // Conflict
+        response[JsonKeys::CODE] = (int)StatusCode::CONFLICT; // Conflict
         response[JsonKeys::MSG] = "用户名已存在";
         sender->sendJson(response);
         return;
@@ -67,10 +67,10 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
             UserDao::addDoctorInfo(newId, intro, spec);
         }
 
-        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
         response[JsonKeys::MSG] = "添加用户成功";
     } else {
-        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
         response[JsonKeys::MSG] = "数据库插入失败";
     }
 
@@ -81,7 +81,7 @@ void AdminHandler::handleDeleteUser(ClientSocket* sender, const QJsonObject& req
     if (!checkAdminPermission(sender)) {
         QJsonObject err;
         err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
         err[JsonKeys::MSG] = "无权操作";
         sender->sendJson(err);
         return;
@@ -94,7 +94,7 @@ void AdminHandler::handleDeleteUser(ClientSocket* sender, const QJsonObject& req
     response[JsonKeys::CMD] = request[JsonKeys::CMD];
 
     if (targetId <= 0) {
-        response[JsonKeys::CODE] = 400;
+        response[JsonKeys::CODE] = (int)StatusCode::BAD_REQUEST;
         response[JsonKeys::MSG] = "无效的用户ID";
         sender->sendJson(response);
         return;
@@ -113,10 +113,10 @@ void AdminHandler::handleDeleteUser(ClientSocket* sender, const QJsonObject& req
 
     // 删库
     if (UserDao::deleteUser(targetId)) {
-        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
         response[JsonKeys::MSG] = "用户删除成功";
     } else {
-        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
         response[JsonKeys::MSG] = "删除失败，ID可能不存在";
     }
 
@@ -127,7 +127,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
     if (!checkAdminPermission(sender)) {
         QJsonObject err;
         err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
         err[JsonKeys::MSG] = "无权操作";
         sender->sendJson(err);
         return;
@@ -161,7 +161,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
     }
 
     if (success) {
-        response[JsonKeys::CODE] = 200;
+        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
         response[JsonKeys::MSG] = "用户信息更新成功";
 
         // 通知目标用户
@@ -178,7 +178,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
         }
 
     } else {
-        response[JsonKeys::CODE] = 500;
+        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
         response[JsonKeys::MSG] = "更新失败，数据库错误或ID不存在";
     }
 
@@ -250,7 +250,7 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
                 // 构建回包
                 QJsonObject response;
                 response[JsonKeys::CMD] = (int)CmdType::GET_STATISTICS;
-                response[JsonKeys::CODE] = 200;
+                response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
                 response[JsonKeys::DATA] = resultMap;
 
                 // 回到创建 client 的线程执行 sendJson
@@ -270,7 +270,7 @@ void AdminHandler::handleGetUserList(ClientSocket* sender, const QJsonObject& re
     if (!checkAdminPermission(sender)) {
         QJsonObject err;
         err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = 403;
+        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
         err[JsonKeys::MSG] = "无权操作";
         sender->sendJson(err);
         return;
@@ -280,7 +280,7 @@ void AdminHandler::handleGetUserList(ClientSocket* sender, const QJsonObject& re
 
     QJsonObject response;
     response[JsonKeys::CMD] = request[JsonKeys::CMD];
-    response[JsonKeys::CODE] = 200;
+    response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
     response[JsonKeys::DATA] = userList;
 
     sender->sendJson(response);

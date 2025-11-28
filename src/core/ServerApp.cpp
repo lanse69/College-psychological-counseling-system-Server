@@ -12,7 +12,7 @@ ServerApp& ServerApp::instance() {
 
 // 注册在线用户 (登录成功后调用)
 void ServerApp::registerUser(int userId, ClientSocket* socket) {
-    QMutexLocker locker(&m_mutex);
+    QMutexLocker locker(&m_mutex); // 打开互斥锁
     // 如果用户之前有连接
     if (m_onlineUsers.contains(userId)) {
         ClientSocket* oldSocket = m_onlineUsers.value(userId);
@@ -27,7 +27,7 @@ void ServerApp::registerUser(int userId, ClientSocket* socket) {
         // 通知旧客户端
         QJsonObject kickMsg;
         kickMsg[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
-        kickMsg[JsonKeys::CODE] = 409; // Conflict
+        kickMsg[JsonKeys::CODE] = (int)StatusCode::CONFLICT; // Conflict
         kickMsg[JsonKeys::MSG] = "您的账号已在其他设备登录，本连接即将断开。";
         oldSocket->sendJson(kickMsg);
 
