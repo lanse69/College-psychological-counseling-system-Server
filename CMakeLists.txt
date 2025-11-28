@@ -17,7 +17,7 @@ qt_add_executable(appPsyServer
         # src/dao/AppointmentDao.h src/dao/AppointmentDao.cpp
         src/dao/DBManager.h src/dao/DBManager.cpp
         # src/dao/QuestionnaireDao.h src/dao/QuestionnaireDao.cpp
-        # src/dao/ScheduleDao.h src/dao/ScheduleDao.cpp
+        src/dao/ScheduleDao.h src/dao/ScheduleDao.cpp
         # src/dao/StatisticsDao.h src/dao/StatisticsDao.cpp
         src/dao/UserDao.h src/dao/UserDao.cpp
         src/logic/AdminHandler.h src/logic/AdminHandler.cpp

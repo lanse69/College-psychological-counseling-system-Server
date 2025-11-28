@@ -1,6 +1,5 @@
 #include "AuthHandler.h"
 
-#include <QCryptographicHash>
 #include <QDebug>
 
 #include "dao/UserDao.h"
@@ -10,13 +9,10 @@
 void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) {
     QJsonObject data = request[JsonKeys::DATA].toObject();
     QString username = data[JsonKeys::USERNAME].toString();
-    QString password = data[JsonKeys::PASSWORD].toString();
-
-    // 计算密码 Hash (SHA256)
-    QString hashedPassword = QString(QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QString passwordHash = data[JsonKeys::PASSWORD].toString();
 
     // 查库验证
-    UserInfo user = UserDao::validateUser(username, hashedPassword);
+    UserInfo user = UserDao::validateUser(username, passwordHash);
 
     QJsonObject response;
     response[JsonKeys::CMD] = (int)CmdType::LOGIN;

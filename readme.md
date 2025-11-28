@@ -53,6 +53,9 @@ sudo -u postgres psql
 -- 创建用户 (用户: PsyServer, 密码: PsyDB@Of@PostgreSQL)
 CREATE USER "PsyServer" WITH PASSWORD 'PsyDB@Of@PostgreSQL';
 
+-- 赋予这个用户建库权限
+ALTER USER "PsyServer" CREATEDB;
+
 -- 创建数据库并指定所有者
 CREATE DATABASE "PsyDB" OWNER "PsyServer";
 

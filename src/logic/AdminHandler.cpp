@@ -3,7 +3,6 @@
 #include <QtConcurrent>
 #include <QJsonArray>
 #include <QPointer>
-#include <QCryptographicHash>
 #include <QDebug>
 
 #include "dao/UserDao.h"
@@ -30,7 +29,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
     QString username = data[JsonKeys::USERNAME].toString();
-    QString rawPass  = data[JsonKeys::PASSWORD].toString();
+    QString passHash = data[JsonKeys::PASSWORD].toString();
     QString realName = data[JsonKeys::REAL_NAME].toString();
     int role = data[JsonKeys::ROLE].toInt();
 
@@ -38,7 +37,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
     response[JsonKeys::CMD] = request[JsonKeys::CMD];
 
     // 检查参数
-    if (username.isEmpty() || rawPass.isEmpty()) {
+    if (username.isEmpty() || passHash.isEmpty()) {
         response[JsonKeys::CODE] = (int)StatusCode::BAD_REQUEST;
         response[JsonKeys::MSG] = "用户名或密码不能为空";
         sender->sendJson(response);
@@ -52,9 +51,6 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
         sender->sendJson(response);
         return;
     }
-
-    // 计算 Hash
-    QString passHash = QString(QCryptographicHash::hash(rawPass.toUtf8(), QCryptographicHash::Sha256).toHex());
 
     // 执行插入
     int newId = UserDao::addUser(username, passHash, role, realName);
@@ -136,7 +132,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int targetId = data[JsonKeys::TARGET_ID].toInt();
     QString realName = data[JsonKeys::REAL_NAME].toString();
-    QString rawPass = data[JsonKeys::PASSWORD].toString();
+    QString passHash = data[JsonKeys::PASSWORD].toString();
 
     // 医生特有字段
     QString intro = data[JsonKeys::INTRO].toString();
@@ -144,12 +140,6 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
 
     QJsonObject response;
     response[JsonKeys::CMD] = request[JsonKeys::CMD];
-
-    // 密码 Hash
-    QString passHash = "";
-    if (!rawPass.isEmpty()) {
-        passHash = QString(QCryptographicHash::hash(rawPass.toUtf8(), QCryptographicHash::Sha256).toHex());
-    }
 
     // 更新基础表 (users)
     bool success = UserDao::updateBasicInfo(targetId, realName, passHash);
