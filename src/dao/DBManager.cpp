@@ -29,7 +29,8 @@ bool DBManager::connectToDatabase() {
     
     // 检查 PostgreSQL 驱动
     if (!QSqlDatabase::isDriverAvailable("QPSQL")) {
-        qCritical() << "Error: QPSQL driver not loaded! Please install libpq and Qt PSQL plugin.";
+        qCritical() << "驱动错误: 未检测到 QPSQL 驱动!";
+        qCritical() << "请确保已安装 PostgreSQL 客户端库 (libpq) 并将其路径添加到环境变量 PATH 中。";
         return false;
     }
 
@@ -54,15 +55,15 @@ bool DBManager::connectToDatabase() {
                 query.addBindValue(config.dbName);
                 if (!(query.exec() && query.next())) {
                     // 数据库不存在，创建它
-                    qDebug() << "Creating database:" << config.dbName;
+                    qDebug() << "创建数据库:" << config.dbName;
                     if (!query.exec(QString("CREATE DATABASE \"%1\"").arg(config.dbName))) {
-                        qCritical() << "Failed to create database:" << query.lastError().text();
+                        qCritical() << "创建数据库失败:" << query.lastError().text();
                     }
                 }
             } // 销毁query对象, 方便后面安全关闭连接
             tempDb.close();
         } else {
-            qCritical() << "Failed to connect to Postgres server (db=postgres):" << tempDb.lastError().text();
+            qCritical() << "连接 Postgres 服务(db=postgres)失败:" << tempDb.lastError().text();
             return false;
         }
     }
@@ -83,10 +84,10 @@ bool DBManager::connectToDatabase() {
     m_mainDb.setDatabaseName(config.dbName);
 
     if (!m_mainDb.open()) {
-        qCritical() << "Main DB Connection Failed:" << m_mainDb.lastError().text();
+        qCritical() << "数据库主连接连接失败:" << m_mainDb.lastError().text();
         return false;
     }
-    qDebug() << "Connected to PostgreSQL database:" << config.dbName;
+    qDebug() << "已连接 PostgreSQL 数据库:" << config.dbName;
     return true;
 }
 
@@ -107,7 +108,7 @@ QSqlDatabase DBManager::openThreadConnection(QString &connectionName) {
     db.setDatabaseName(config.dbName);
     
     if (!db.open()) {
-        qWarning() << "Thread DB Open Failed:" << db.lastError().text();
+        qWarning() << "线程连接数据库失败:" << db.lastError().text();
     }
     
     return db;
@@ -255,7 +256,7 @@ bool DBManager::initTables() {
 bool DBManager::createTable(const QString &tableName, const QString &sql) {
     QSqlQuery query(m_mainDb);
     if (!query.exec(sql)) {
-        qCritical() << "Failed to create table" << tableName << ":" << query.lastError().text();
+        qCritical() << "创建表失败：" << tableName << ":" << query.lastError().text();
         return false;
     }
     return true;
@@ -268,7 +269,7 @@ void DBManager::seedDefaultAdmin() {
         return; 
     }
 
-    qDebug() << "Seeding default admin account...";
+    qDebug() << "植入默认管理员账户...";
     query.prepare("INSERT INTO users (username, password, role, real_name) VALUES (:u, :p, :r, :n)");
     query.bindValue(":u", "admin");
     QString hashedPassword = QString(QCryptographicHash::hash("123456", QCryptographicHash::Sha256).toHex());
@@ -277,8 +278,8 @@ void DBManager::seedDefaultAdmin() {
     query.bindValue(":n", "System Admin");
     
     if (!query.exec()) {
-        qWarning() << "Failed to seed admin:" << query.lastError().text();
+        qWarning() << "植入管理员失败:" << query.lastError().text();
     } else {
-        qDebug() << "Default Admin created. User: admin, Pass: 123456";
+        qDebug() << "默认管理员创建成功. 用户名: admin, 密码: 123456";
     }
 }

@@ -22,7 +22,7 @@ void ServerApp::registerUser(int userId, ClientSocket* socket) {
             return;
         }
 
-        qInfo() << "[ServerApp] User" << userId << "logged in from new location. Kicking old connection.";
+        qInfo() << "用户 " << userId << " 从新位置登陆. 断开前连接.";
 
         // 通知旧客户端
         QJsonObject kickMsg;
@@ -45,14 +45,14 @@ void ServerApp::registerUser(int userId, ClientSocket* socket) {
     // 绑定 Socket 与 UserID (用于断线反查)
     socket->setUserId(userId);
 
-    qDebug() << "[ServerApp] User registered online:" << userId << "Total online:" << m_onlineUsers.size();
+    qDebug() << "用户上线:" << userId << " 当前在线人数:" << m_onlineUsers.size();
 }
 
 // 用户下线
 void ServerApp::unregisterUser(int userId) {
     QMutexLocker locker(&m_mutex);
     m_onlineUsers.remove(userId);
-    qDebug() << "User logged out:" << userId;
+    qDebug() << "用户下线:" << userId;
 }
 
 // 获取用户 Socket 用于推送

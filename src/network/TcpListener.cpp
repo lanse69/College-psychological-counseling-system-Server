@@ -9,10 +9,10 @@ TcpListener::TcpListener(QObject *parent) : QTcpServer(parent) {}
 
 bool TcpListener::start(int port) {
     if (!this->listen(QHostAddress::Any, port)) {
-        qCritical() << "Server could not start on port" << port;
+        qCritical() << "错误: 服务端无法监听端口 " << port;
         return false;
     }
-    qDebug() << "PsyServer listening on port" << port;
+    qDebug() << "服务端开始监听端口 " << port;
     return true;
 }
 
@@ -24,14 +24,14 @@ void TcpListener::incomingConnection(qintptr socketDescriptor) {
     
     m_clients.insert(socketDescriptor, client);
     
-    qDebug() << "New Connection stored in Map. Descriptor:" << socketDescriptor 
-             << "Total Clients:" << m_clients.size();
+    qDebug() << "新客户端接入. 描述符:" << socketDescriptor
+             << " 当前连接数:" << m_clients.size();
 }
 
 void TcpListener::onClientJsonReceived(ClientSocket* sender, const QJsonObject& json) {
     // 安全检查
     if (!sender) {
-        qWarning() << "[TcpListener] Error: Received signal from null sender.";
+        qWarning() << "TCP 监听错误: 接收到未知来源信号.";
         return;
     }
     
@@ -55,8 +55,8 @@ void TcpListener::onClientDisconnected(ClientSocket* sender) {
 
     if (found) {
         m_clients.remove(keyToRemove);
-        qDebug() << "Client removed from Map. Descriptor:" << keyToRemove 
-                 << "Remaining:" << m_clients.size();
+        qDebug() << "客户端从 Map 中移除. 描述符:" << keyToRemove
+                 << " 剩余:" << m_clients.size();
     }
 
     if (sender->userId() != -1) {

@@ -27,7 +27,7 @@ UserInfo UserDao::validateUser(const QString& username, const QString& passwordH
             user.realName = query.value("real_name").toString();
         }
     } else {
-        qCritical() << "Login query failed:" << query.lastError().text();
+        qCritical() << "登陆查询失败:" << query.lastError().text();
     }
     return user;
 }
@@ -58,7 +58,7 @@ int UserDao::addUser(const QString& username, const QString& passwordHash, int r
             return query.value(0).toInt();
         }
     } else {
-        qCritical() << "Add User Failed:" << query.lastError().text();
+        qCritical() << "添加用户失败:" << query.lastError().text();
     }
     return -1;
 }
@@ -71,7 +71,7 @@ bool UserDao::addDoctorInfo(int userId, const QString& intro, const QString& spe
     query.bindValue(":spec", specializedField);
 
     if (!query.exec()) {
-        qCritical() << "Add Doctor Info Failed:" << query.lastError().text();
+        qCritical() << "添加医生信息失败:" << query.lastError().text();
         return false;
     }
     return true;
@@ -83,7 +83,7 @@ bool UserDao::deleteUser(int userId) {
     query.bindValue(":id", userId);
 
     if (!query.exec()) {
-        qCritical() << "Delete User Failed:" << query.lastError().text();
+        qCritical() << "删除用户失败:" << query.lastError().text();
         return false;
     }
     return true;
@@ -117,7 +117,7 @@ bool UserDao::updateBasicInfo(int userId, const QString& realName, const QString
     }
 
     if (!query.exec()) {
-        qCritical() << "Update User Basic Info Failed:" << query.lastError().text();
+        qCritical() << "更新用户基本信息失败:" << query.lastError().text();
         return false;
     }
     return true;
@@ -131,7 +131,7 @@ bool UserDao::updateDoctorInfo(int userId, const QString& intro, const QString& 
     query.bindValue(":id", userId);
 
     if (!query.exec()) {
-        qCritical() << "Update Doctor Info Failed:" << query.lastError().text();
+        qCritical() << "更新医生信息失败:" << query.lastError().text();
         return false;
     }
     return true;
@@ -154,7 +154,7 @@ QJsonArray UserDao::getAllUsers(int excludeId) {
             list.append(obj);
         }
     } else {
-        qWarning() << "Get All Users Failed:" << query.lastError().text();
+        qWarning() << "获取所有用户失败:" << query.lastError().text();
     }
     return list;
 }

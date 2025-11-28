@@ -23,15 +23,16 @@ void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) 
 
     if (user.isValid()) {
         // 登录成功
-        qDebug() << "User login success:" << username << "Role:" << user.role;
+        qDebug() << "用户登录成功:" << username << " 角色:" << user.role;
 
         // 绑定 Socket 与 UserID
         sender->setUserId(user.id);
+        qDebug() << "Socket 状态更新 -> 绑定用户ID:" << user.id;
         // 注册到全局在线列表
         ServerApp::instance().registerUser(user.id, sender);
 
         response[JsonKeys::CODE] = 200;
-        response[JsonKeys::MSG] = "Login Success";
+        response[JsonKeys::MSG] = "登录成功";
         
         QJsonObject respData;
         respData[JsonKeys::USER_ID] = user.id;
@@ -42,9 +43,9 @@ void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) 
         response[JsonKeys::DATA] = respData;
     } else {
         // 登录失败
-        qWarning() << "User login failed:" << username;
+        qWarning() << "用户登录失败:" << username;
         response[JsonKeys::CODE] = 401;
-        response[JsonKeys::MSG] = "Invalid username or password";
+        response[JsonKeys::MSG] = "无效用户名或密码";
     }
 
     // 发送回包

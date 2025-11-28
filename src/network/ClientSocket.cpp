@@ -17,14 +17,14 @@ ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
 {
     m_socket = new QTcpSocket(this);
     if (!m_socket->setSocketDescriptor(socketDescriptor)) {
-        qWarning() << "Socket error:" << m_socket->errorString();
+        qWarning() << "套接字（socket）错误:" << m_socket->errorString();
         return;
     }
 
     connect(m_socket, &QTcpSocket::readyRead, this, &ClientSocket::onReadyRead);
     connect(m_socket, &QTcpSocket::disconnected, this, &ClientSocket::onDisconnected);
     
-    qDebug() << "New Client Connected:" << socketDescriptor;
+    qDebug() << "已连接新客户端:" << socketDescriptor;
 }
 
 ClientSocket::~ClientSocket() {
@@ -85,13 +85,13 @@ void ClientSocket::onReadyRead() {
         if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
             emit jsonReceived(this, doc.object());
         } else {
-            qWarning() << "JSON Parse Error:" << parseError.errorString();
+            qWarning() << "JSON 解析错误:" << parseError.errorString();
         }
     }
 }
 
 void ClientSocket::onDisconnected() {
-    qDebug() << "Client Disconnected";
+    qDebug() << "客户端断开连接";
     emit disconnected(this);
     deleteLater(); // 自我销毁
 }

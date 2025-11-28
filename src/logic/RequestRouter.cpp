@@ -21,7 +21,9 @@ void RequestRouter::dispatch(ClientSocket* sender, const QJsonObject& request) {
     int cmdVal = request[JsonKeys::CMD].toInt();
     CmdType cmd = static_cast<CmdType>(cmdVal);
 
-    qDebug() << "Dispatching CMD:" << cmdVal << "from User:" << sender->userId();
+    int uid = sender->userId();
+    QString userStr = (uid == -1) ? "未登录(Guest)" : QString::number(uid);
+    qDebug() << "分派 CMD:" << cmdVal << " 来源用户:" << userStr;
 
     switch (cmd) {
         // 认证相关
@@ -75,7 +77,7 @@ void RequestRouter::dispatch(ClientSocket* sender, const QJsonObject& request) {
         // else
 
         default:
-            qWarning() << "Unknown or Unhandled command:" << cmdVal;
+            qWarning() << "未知或未处理的命令:" << cmdVal;
             break;
     }
 }

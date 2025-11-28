@@ -13,7 +13,7 @@ ConfigManager& ConfigManager::instance() {
 bool ConfigManager::loadConfig(const QString &filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCritical() << "Failed to open config file:" << filePath;
+        qCritical() << "打开配置文件失败:" << filePath;
         return false;
     }
 
@@ -23,7 +23,7 @@ bool ConfigManager::loadConfig(const QString &filePath) {
     QJsonParseError parseError;
     QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        qCritical() << "Config JSON parse error:" << parseError.errorString();
+        qCritical() << "JSON配置解析错误:" << parseError.errorString();
         return false;
     }
 
@@ -38,7 +38,7 @@ bool ConfigManager::loadConfig(const QString &filePath) {
         m_dbConfig.password = dbObj["password"].toString("PsyDB@Of@PostgreSQL");
         m_dbConfig.dbName = dbObj["db_name"].toString("PsyDB");
     } else {
-        qCritical() << "Config missing 'database' node";
+        qCritical() << "缺少数据库节点配置";
         return false;
     }
 
@@ -48,12 +48,12 @@ bool ConfigManager::loadConfig(const QString &filePath) {
         m_netConfig.listenPort = netObj["listen_port"].toInt(9999);
         m_netConfig.maxConnections = netObj["max_connections"].toInt(100);
     } else {
-        qWarning() << "Config missing 'network' node, using defaults.";
+        qWarning() << "缺少网络节点配置, 使用默认.";
         m_netConfig.listenPort = 9999;
         m_netConfig.maxConnections = 100;
     }
 
-    qDebug() << "Configuration loaded successfully.";
+    qDebug() << "配置加载成功.";
     return true;
 }
 

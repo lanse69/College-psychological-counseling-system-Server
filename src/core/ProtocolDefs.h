@@ -5,8 +5,27 @@
 
 // 定义包头长度(quint32)
 static const qint64 PACKET_HEAD_SIZE = sizeof(quint32); 
-
 static const int MAX_PACKET_SIZE = 10 * 1024 * 1024; // 最大允许包大小10MB
+
+// [状态码定义 (StatusCode)]
+// 所有回包 JSON 中 code 字段的含义
+enum StatusCode {
+    SUCCESS                 = 200, // 操作成功
+
+    // 业务流程相关
+    NEGOTIATION_REQUIRED    = 201, // (特指) 医生修改预约时，服务端收到请求，但需要学生确认，暂未修改入库
+
+    // 客户端错误 (4xx)
+    BAD_REQUEST             = 400, // 参数缺失或格式错误
+    UNAUTHORIZED            = 401, // 未登录或密码错误
+    FORBIDDEN               = 403, // 权限不足 (如学生尝试操作管理员接口)
+    NOT_FOUND               = 404, // 请求的资源(用户/预约)不存在
+    CONFLICT                = 409, // 资源冲突 (如用户名已存在、该时间段已被预约、账号在别处登录)
+
+    // 服务端错误 (5xx)
+    INTERNAL_ERROR          = 500, // 数据库错误或未知异常
+    NOT_IMPLEMENTED         = 501  // 接口尚未开发
+};
 
 // 通信指令类型 (Command Type)
 enum class CmdType {
@@ -55,6 +74,20 @@ enum class CmdType {
     PUSH_NOTIFICATION = 9000 // 服务端主动推消息 (如: 预约被取消、收到修改请求)
 };
 
+// [排班时间段位掩码定义 (TimeSlot Bitmask)]
+// 用于 schedules 表的 time_slot_flags 字段
+// 0 = 空闲, 1 = 忙碌/不开放
+// Bit 0: 08:00 - 09:00
+// Bit 1: 09:00 - 10:00
+// Bit 2: 10:00 - 11:00
+// Bit 3: 11:00 - 12:00
+// Bit 4: 13:00 - 14:00
+// Bit 5: 14:00 - 15:00
+// Bit 6: 15:00 - 16:00
+// Bit 7: 16:00 - 17:00
+// Bit 8: 17:00 - 18:00
+static const int TIMESLOT_START_HOUR = 8; // 起始时间 8点
+
 // 角色定义 (Role)
 enum class UserRole {
     STUDENT = 1,
@@ -68,7 +101,7 @@ enum class ApptStatus {
     CONFIRMED = 1,          // 已确认/即将开始
     COMPLETED = 2,          // 已完成
     CANCELLED = 3,          // 已取消
-    PENDING_CHANGE_CONFIRM  // 待学生确认变更 (医生发起了修改请求)
+    PENDING_CHANGE_CONFIRM = 4 // 医生发起修改，待学生确认
 };
 
 // JSON 键名常量 (Key Constants)
@@ -89,9 +122,13 @@ namespace JsonKeys {
     const QString SPEC      = "spec";        // 擅长领域 (Specialized Field)
     const QString TARGET_ID = "targetId";    // 要删除的目标用户ID
     const QString APPT_ID   = "apptId";     // 预约ID
+    const QString DATE      = "date";       // "2025-11-27"
     const QString DOC_ID    = "docId";
     const QString STU_ID    = "stuId";
-    const QString DATE      = "date";       // "2025-11-27"
     const QString TIME_SLOT = "timeSlot";   // "14:00-15:00"
-    const QString STAT_TYPE = "statType";   // 报表类型
+
+    // 统计报表相关
+    const QString STAT_TYPE    = "statType"; // common_issues, consult_trend
+    const QString STAT_LABEL   = "label";    // 图表X轴
+    const QString STAT_VALUE   = "value";    // 图表Y轴
 }
