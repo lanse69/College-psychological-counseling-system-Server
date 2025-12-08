@@ -1,9 +1,11 @@
 #include "ScheduleDao.h"
-#include "DBManager.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
+
+#include "DBManager.h"
+#include "core/ProtocolDefs.h" 
 
 bool ScheduleDao::initSchedule(int doctorId, QDate date) {
     QSqlDatabase db = DBManager::instance().getMainDatabase();
@@ -64,22 +66,33 @@ QMap<QString, int> ScheduleDao::getScheduleRange(int doctorId, QDate startDate, 
 }
 
 bool ScheduleDao::isSlotAvailable(int doctorId, QDate date, int slotIndex) {
-    if (slotIndex < 0 || slotIndex > 31) return false;
+    // 严格边界检查
+    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+        qWarning() << "isSlotAvailable: 索引越界 " << slotIndex;
+        return false; // 越界视为不可用
+    }
 
     int flags = getScheduleFlag(doctorId, date);
-    // 检查对应位是否为 0
-    // (flags >> slotIndex) & 1
-    bool isBusy = (flags & (1 << slotIndex));
+    
+    // 检查对应位是否为 0 (0表示空闲)
+    // (flags >> slotIndex) & 1 取出第 slotIndex 位的值
+    bool isBusy = (flags >> slotIndex) & 1;
+    
     return !isBusy;
 }
 
 bool ScheduleDao::occupySlot(int doctorId, QDate date, int slotIndex) {
+    // 严格边界检查
+    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+        qCritical() << "occupySlot: 索引越界 " << slotIndex;
+        return false;
+    }
+
     // 确保记录存在
     if (!initSchedule(doctorId, date)) return false;
 
     QSqlQuery query(DBManager::instance().getMainDatabase());
-    // 1 << slotIndex 计算位掩码
-    // | (OR) 操作符将该位置 1
+    // 利用位运算 OR (|) 将对应位置 1
     query.prepare(R"(
         UPDATE schedules
         SET time_slot_flags = time_slot_flags | (1 << :slot)
@@ -98,8 +111,14 @@ bool ScheduleDao::occupySlot(int doctorId, QDate date, int slotIndex) {
 }
 
 bool ScheduleDao::releaseSlot(int doctorId, QDate date, int slotIndex) {
+    // 严格边界检查
+    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+        qCritical() << "releaseSlot: 索引越界 " << slotIndex;
+        return false;
+    }
+
     QSqlQuery query(DBManager::instance().getMainDatabase());
-    // 利用位运算 AND NOT (& ~) 将对应位置为 0
+    // 利用位运算 AND NOT (& ~) 将对应位置 0
     query.prepare(R"(
         UPDATE schedules
         SET time_slot_flags = time_slot_flags & ~(1 << :slot)
@@ -119,6 +138,10 @@ bool ScheduleDao::releaseSlot(int doctorId, QDate date, int slotIndex) {
 
 bool ScheduleDao::updateScheduleMask(int doctorId, QDate date, int newMask) {
     if (!initSchedule(doctorId, date)) return false;
+
+    if (newMask > 127) {
+        qWarning() << "警告: 排班掩码 " << newMask << " 超出 7 个时段的范围 (0-127)";
+    }
 
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare("UPDATE schedules SET time_slot_flags = :mask WHERE doctor_id = :did AND date = :date");

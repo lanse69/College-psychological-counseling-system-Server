@@ -20,5 +20,5 @@ private slots:
 
 private:
     // Key: socketDescriptor (唯一标识), Value: ClientSocket对象指针
-    QMap<qintptr, ClientSocket*> m_clients; 
+    QMap<qintptr, ClientSocket*> m_clients;
 };

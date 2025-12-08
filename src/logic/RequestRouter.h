@@ -6,7 +6,8 @@
 
 class ClientSocket;
 
-class RequestRouter : public QObject {
+class RequestRouter : public QObject
+{
     Q_OBJECT
 public:
     // 单例访问

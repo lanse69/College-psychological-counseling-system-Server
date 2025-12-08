@@ -3,17 +3,20 @@
 #include <QObject>
 #include <QJsonObject>
 
+#include "core/ProtocolDefs.h"
+
 class ClientSocket;
 
-class BookingHandler : public QObject {
+class BookingHandler : public QObject
+{
     Q_OBJECT
 public:
     // 学生发起预约
     static void handleCreateBooking(ClientSocket* sender, const QJsonObject& request);
-    
+
     // 获取我的预约
     static void handleGetMyBookings(ClientSocket* sender, const QJsonObject& request);
-    
+
     // 取消预约 (医生取消需要推送通知给学生)
     static void handleCancelBooking(ClientSocket* sender, const QJsonObject& request);
 
@@ -28,4 +31,7 @@ public:
 
 private:
     BookingHandler() = default;
+
+    static void sendSuccessResponse(ClientSocket* sender, const QJsonObject& request, const QString& message);
+    static void sendErrorResponse(ClientSocket* sender, const QJsonObject& request, StatusCode code, const QString& message);
 };

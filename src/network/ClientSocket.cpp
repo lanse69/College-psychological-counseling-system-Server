@@ -1,6 +1,8 @@
 #include "ClientSocket.h"
 
 #include <QDebug>
+#include <QJsonDocument>
+#include <QDataStream>
 
 #include "core/ProtocolDefs.h" // 引用协议定义
 
@@ -10,6 +12,12 @@ int ClientSocket::userId() const {
 
 void ClientSocket::setUserId(int id) { 
     m_userId = id; 
+}
+
+void ClientSocket::disconnectFromHost() {
+    if (m_socket) {
+        m_socket->disconnectFromHost();
+    }
 }
 
 ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
@@ -23,7 +31,7 @@ ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
 
     connect(m_socket, &QTcpSocket::readyRead, this, &ClientSocket::onReadyRead);
     connect(m_socket, &QTcpSocket::disconnected, this, &ClientSocket::onDisconnected);
-    
+
     qDebug() << "已连接新客户端:" << socketDescriptor;
 }
 

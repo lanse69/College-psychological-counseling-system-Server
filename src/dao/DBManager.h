@@ -18,7 +18,7 @@ public:
 
     // 获取主线程的连接 (用于普通的快速操作，如登录、简单查询)
     QSqlDatabase getMainDatabase() const;
-    
+
     /**
      * @brief 为当前线程创建一个新的、独立的数据库连接
      * @param connectionName [输出参数] 返回生成的唯一连接名，用于后续清理

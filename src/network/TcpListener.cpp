@@ -21,9 +21,9 @@ void TcpListener::incomingConnection(qintptr socketDescriptor) {
     
     connect(client, &ClientSocket::jsonReceived, this, &TcpListener::onClientJsonReceived);
     connect(client, &ClientSocket::disconnected, this, &TcpListener::onClientDisconnected);
-    
+
     m_clients.insert(socketDescriptor, client);
-    
+
     qDebug() << "新客户端接入. 描述符:" << socketDescriptor
              << " 当前连接数:" << m_clients.size();
 }

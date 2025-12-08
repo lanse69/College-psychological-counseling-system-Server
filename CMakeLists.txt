@@ -7,25 +7,25 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Network Sql Concurrent)
 
-qt_standard_project_setup(REQUIRES 6.8)
+qt_standard_project_setup(REQUIRES 6.9)
 
 qt_add_executable(appPsyServer
 	src/main.cpp
         src/core/ProtocolDefs.h
         src/core/ConfigManager.h src/core/ConfigManager.cpp
         src/core/ServerApp.h src/core/ServerApp.cpp
-        # src/dao/AppointmentDao.h src/dao/AppointmentDao.cpp
+        src/dao/AppointmentDao.h src/dao/AppointmentDao.cpp
         src/dao/DBManager.h src/dao/DBManager.cpp
-        # src/dao/QuestionnaireDao.h src/dao/QuestionnaireDao.cpp
+        src/dao/QuestionnaireDao.h src/dao/QuestionnaireDao.cpp
         src/dao/ScheduleDao.h src/dao/ScheduleDao.cpp
-        # src/dao/StatisticsDao.h src/dao/StatisticsDao.cpp
+        src/dao/StatisticsDao.h src/dao/StatisticsDao.cpp
         src/dao/UserDao.h src/dao/UserDao.cpp
         src/logic/AdminHandler.h src/logic/AdminHandler.cpp
         src/logic/AuthHandler.h src/logic/AuthHandler.cpp
         src/logic/BookingHandler.h src/logic/BookingHandler.cpp
-        # src/logic/DoctorHandler.h src/logic/DoctorHandler.cpp
+        src/logic/DoctorHandler.h src/logic/DoctorHandler.cpp
         src/logic/RequestRouter.h src/logic/RequestRouter.cpp
-        # src/logic/SurveyHandler.h src/logic/SurveyHandler.cpp
+        src/logic/SurveyHandler.h src/logic/SurveyHandler.cpp
         src/network/ClientSocket.h src/network/ClientSocket.cpp
         src/network/TcpListener.h src/network/TcpListener.cpp
 )

@@ -4,33 +4,43 @@
 
 #include "core/ConfigManager.h"
 
-DBManager& DBManager::instance() {
+DBManager &DBManager::instance()
+{
     static DBManager instance;
     return instance;
 }
 
 DBManager::DBManager() {}
 
-DBManager::~DBManager() {
+DBManager::~DBManager()
+{
     if (m_mainDb.isOpen()) {
         m_mainDb.close();
     }
 }
 
-QSqlDatabase DBManager::getMainDatabase() const {
+QSqlDatabase DBManager::getMainDatabase() const
+{
+    // 如果连接未打开，尝试重新打开
+    if (!m_mainDb.isOpen()) {
+        qDebug() << "主数据库连接已断开，尝试重连...";
+        const_cast<DBManager*>(this)->m_mainDb.open();
+    }
     return m_mainDb;
 }
 
-bool DBManager::connectToDatabase() {
+bool DBManager::connectToDatabase()
+{
     // 获取配置
     const DBConfig &config = ConfigManager::instance().db();
-    
+
     m_dbName = config.dbName;
-    
+
     // 检查 PostgreSQL 驱动
     if (!QSqlDatabase::isDriverAvailable("QPSQL")) {
         qCritical() << "驱动错误: 未检测到 QPSQL 驱动!";
-        qCritical() << "请确保已安装 PostgreSQL 客户端库 (libpq) 并将其路径添加到环境变量 PATH 中。";
+        qCritical()
+            << "请确保已安装 PostgreSQL 客户端库 (libpq) 并将其路径添加到环境变量 PATH 中。";
         return false;
     }
 
@@ -76,7 +86,7 @@ bool DBManager::connectToDatabase() {
     } else {
         m_mainDb = QSqlDatabase::addDatabase("QPSQL", mainConnName);
     }
-    
+
     m_mainDb.setHostName(config.host);
     m_mainDb.setPort(config.port);
     m_mainDb.setUserName(config.username);
@@ -91,30 +101,34 @@ bool DBManager::connectToDatabase() {
     return true;
 }
 
-QSqlDatabase DBManager::openThreadConnection(QString &connectionName) {
+QSqlDatabase DBManager::openThreadConnection(
+    QString &connectionName)
+{
     // 生成唯一的连接名
     connectionName = QString("ThreadConn_%1").arg(QUuid::createUuid().toString());
-    
+
     // 添加数据库
     QSqlDatabase db = QSqlDatabase::addDatabase("QPSQL", connectionName);
-    
+
     // 读取配置
     const DBConfig &config = ConfigManager::instance().db();
-    
+
     db.setHostName(config.host);
     db.setPort(config.port);
     db.setUserName(config.username);
     db.setPassword(config.password);
     db.setDatabaseName(config.dbName);
-    
+
     if (!db.open()) {
         qWarning() << "线程连接数据库失败:" << db.lastError().text();
     }
-    
+
     return db;
 }
 
-void DBManager::closeThreadConnection(const QString &connectionName) {
+void DBManager::closeThreadConnection(
+    const QString &connectionName)
+{
     // 必须先让 QSqlDatabase 对象超出作用域或不再被持有，才能 removeDatabase
     {
         QSqlDatabase db = QSqlDatabase::database(connectionName);
@@ -122,12 +136,13 @@ void DBManager::closeThreadConnection(const QString &connectionName) {
             db.close();
         }
     } // db 在此处析构
-    
+
     // 移除连接定义
     QSqlDatabase::removeDatabase(connectionName);
 }
 
-bool DBManager::initTables() {
+bool DBManager::initTables()
+{
     bool success = true;
 
     // 用户表 (users)
@@ -245,6 +260,16 @@ bool DBManager::initTables() {
         );
     )");
 
+    // 为 users 表的 role 字段创建索引
+    QSqlQuery query(m_mainDb);
+    QString createIndexSql = "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)";
+    
+    if (!query.exec(createIndexSql)) {
+        qWarning() << "警告: 创建 role 索引失败 (不影响主流程):" << query.lastError().text();
+    } else {
+        qDebug() << "索引 idx_users_role 检查/创建完成";
+    }
+
     // 初始化默认数据
     if (success) {
         seedDefaultAdmin();
@@ -253,7 +278,9 @@ bool DBManager::initTables() {
     return success;
 }
 
-bool DBManager::createTable(const QString &tableName, const QString &sql) {
+bool DBManager::createTable(
+    const QString &tableName, const QString &sql)
+{
     QSqlQuery query(m_mainDb);
     if (!query.exec(sql)) {
         qCritical() << "创建表失败：" << tableName << ":" << query.lastError().text();
@@ -262,21 +289,24 @@ bool DBManager::createTable(const QString &tableName, const QString &sql) {
     return true;
 }
 
-void DBManager::seedDefaultAdmin() {
+void DBManager::seedDefaultAdmin()
+{
     QSqlQuery query(m_mainDb);
-    query.exec("SELECT count(*) FROM users WHERE role = 3"); 
+    query.exec("SELECT count(*) FROM users WHERE role = 3");
     if (query.next() && query.value(0).toInt() > 0) {
-        return; 
+        return;
     }
 
     qDebug() << "植入默认管理员账户...";
-    query.prepare("INSERT INTO users (username, password, role, real_name) VALUES (:u, :p, :r, :n)");
+    query.prepare(
+        "INSERT INTO users (username, password, role, real_name) VALUES (:u, :p, :r, :n)");
     query.bindValue(":u", "admin");
-    QString hashedPassword = QString(QCryptographicHash::hash("123456", QCryptographicHash::Sha256).toHex());
+    QString hashedPassword = QString(
+        QCryptographicHash::hash("123456", QCryptographicHash::Sha256).toHex());
     query.bindValue(":p", hashedPassword);
     query.bindValue(":r", 3);
     query.bindValue(":n", "System Admin");
-    
+
     if (!query.exec()) {
         qWarning() << "植入管理员失败:" << query.lastError().text();
     } else {

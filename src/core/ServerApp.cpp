@@ -31,9 +31,9 @@ void ServerApp::registerUser(int userId, ClientSocket* socket) {
         kickMsg[JsonKeys::MSG] = "您的账号已在其他设备登录，本连接即将断开。";
         oldSocket->sendJson(kickMsg);
 
+        oldSocket->disconnectFromHost();
+
         // 旧 Socket 的 UserId 重置为 -1
-        // 当 oldSocket 随后断开连接时，触发 TcpListener::onClientDisconnected，
-        // 进而调用 ServerApp::unregisterUser(userId)
         oldSocket->setUserId(-1);
 
         // 强制断开旧连接

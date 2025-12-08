@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QPointer>
 #include <QDebug>
+#include <QCoreApplication>
 
 #include "dao/UserDao.h"
 #include "dao/DBManager.h"
@@ -176,84 +177,86 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
 }
 
 void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& req) {
-    // 获取 Socket 指针
+    // 使用 QPointer 弱引用 ClientSocket，防止悬空指针
     QPointer<ClientSocket> safeClient(client); 
 
-    // 获取查询参数
+    // 预先解析请求数据，避免在子线程中访问 QJsonObject 的隐式共享深拷贝问题
     QJsonObject data = req[JsonKeys::DATA].toObject();
     QString statType = data["type"].toString();
+    int cmd = req[JsonKeys::CMD].toInt();
 
-    // 启动子线程
-    QFuture<void> future = QtConcurrent::run(
-        [safeClient, statType]() {
-            // 获取独立数据库连接
-            QString connName;
-            QSqlDatabase db = DBManager::instance().openThreadConnection(connName);
+    // 启动子线程执行耗时数据库查询
+    QFuture<void> ignoredFuture = QtConcurrent::run([safeClient, statType, cmd]() {
+        // 早期检查：如果刚进子线程客户端就断了，直接退出节省资源
+        if (!safeClient) return;
 
-            QJsonArray resultMap; // 存储查询结果
+        // 获取独立数据库连接
+        QString connName;
+        QSqlDatabase db = DBManager::instance().openThreadConnection(connName);
+        QJsonArray resultMap; 
 
+        if (db.isOpen()) {
             QSqlQuery query(db);
-            if (db.isOpen()) {
-                // 根据类型进行查询
-                if (statType == "consult_trend") {
-                    // 统计每天/每月的咨询人数]
-                    QString sql = R"(
-                        SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)
-                        FROM appointments
-                        WHERE status = 2
-                        GROUP BY month
-                        ORDER BY month DESC LIMIT 12
-                    )";
-                    if (query.exec(sql)) {
-                        while(query.next()) {
-                            QJsonObject item;
-                            item["label"] = query.value(0).toString();
-                            item["value"] = query.value(1).toInt();
-                            resultMap.append(item);
-                        }
+            
+            if (statType == "consult_trend") {
+                // 统计最近12个月的咨询趋势
+                QString sql = R"(
+                    SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)
+                    FROM appointments
+                    WHERE status = 2
+                    GROUP BY month
+                    ORDER BY month DESC LIMIT 12
+                )";
+                if (query.exec(sql)) {
+                    while(query.next()) {
+                        QJsonObject item;
+                        item["label"] = query.value(0).toString();
+                        item["value"] = query.value(1).toInt();
+                        resultMap.append(item);
                     }
+                } else {
+                    qWarning() << "统计查询失败(consult_trend):" << query.lastError().text();
                 }
             } else if (statType == "common_issues") {
-                // 统计咨询记录中的 tag
-                // TODO: 改为 string_to_array + unnest
+                // 统计常见问题 Tag
                 QString sql = R"(
                     SELECT result_tags, COUNT(*)
                     FROM consultation_records
+                    WHERE result_tags IS NOT NULL AND result_tags != ''
                     GROUP BY result_tags
                     ORDER BY count DESC LIMIT 10
                 )";
                 if (query.exec(sql)) {
                     while(query.next()) {
                         QJsonObject item;
-                        item["label"] = query.value(0).toString(); // tag
+                        item["label"] = query.value(0).toString(); 
                         item["value"] = query.value(1).toInt();
                         resultMap.append(item);
                     }
                 }
-            } // else 其他类型查询
-
-            // 关闭独立连接
-            DBManager::instance().closeThreadConnection(connName);
-
-            // 将结果发送回主线程
-            if (safeClient) {
-                // 构建回包
-                QJsonObject response;
-                response[JsonKeys::CMD] = (int)CmdType::GET_STATISTICS;
-                response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-                response[JsonKeys::DATA] = resultMap;
-
-                // 回到创建 client 的线程执行 sendJson
-                QMetaObject::invokeMethod(
-                    safeClient, [safeClient, response]() {
-                        safeClient->sendJson(response);
-                    }
-                );
-            }
+            } // TODO else
         }
-    );
-    // 防止 future 析构时阻塞
-    (void)future;
+
+        // 关闭独立连接
+        DBManager::instance().closeThreadConnection(connName);
+
+        // 准备回包数据
+        QJsonObject response;
+        response[JsonKeys::CMD] = cmd;
+        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+        response[JsonKeys::DATA] = resultMap;
+
+        // 切换回主线程发送数据
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [safeClient, response]() {
+            // 安全检查：发送前确认客户端还活着
+            if (safeClient) {
+                safeClient->sendJson(response);
+                qDebug() << "统计报表发送成功，数据条数:" << response[JsonKeys::DATA].toArray().size();
+            } else {
+                qDebug() << "统计查询完成，但客户端已断开连接，数据丢弃。";
+            }
+        });
+    });
 }
 
 void AdminHandler::handleGetUserList(ClientSocket* sender, const QJsonObject& request) {
