@@ -182,7 +182,6 @@ void BookingHandler::handleGetMyBookings(
     AppointmentDao dao;
     QString errorMsg;
     QJsonArray appointments = dao.getStudentAppointments(userId, errorMsg);
-    qDebug() << "学生预约数据库查询完成，错误信息:" << errorMsg;
 
     if (!errorMsg.isEmpty()) {
         qWarning() << "学生预约数据库查询失败:" << errorMsg;

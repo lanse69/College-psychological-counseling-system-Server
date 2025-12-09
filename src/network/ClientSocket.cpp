@@ -20,6 +20,14 @@ void ClientSocket::disconnectFromHost() {
     }
 }
 
+qint64 ClientSocket::lastActiveTime() const {
+    return m_lastActiveTime;
+}
+
+void ClientSocket::updateActiveTime() {
+    m_lastActiveTime = QDateTime::currentMSecsSinceEpoch();
+}
+
 ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
     : QObject(parent), m_userId{-1}
 {
@@ -28,6 +36,8 @@ ClientSocket::ClientSocket(qintptr socketDescriptor, QObject *parent)
         qWarning() << "套接字（socket）错误:" << m_socket->errorString();
         return;
     }
+
+    updateActiveTime();
 
     connect(m_socket, &QTcpSocket::readyRead, this, &ClientSocket::onReadyRead);
     connect(m_socket, &QTcpSocket::disconnected, this, &ClientSocket::onDisconnected);
@@ -61,6 +71,8 @@ void ClientSocket::sendJson(const QJsonObject &json) {
 }
 
 void ClientSocket::onReadyRead() {
+    updateActiveTime();
+
     m_buffer.append(m_socket->readAll());
 
     while (true) {

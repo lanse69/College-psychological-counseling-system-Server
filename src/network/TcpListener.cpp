@@ -1,11 +1,16 @@
 #include "TcpListener.h"
 
 #include <QDebug>
+#include <QDateTime>
 
 #include "logic/RequestRouter.h" // 引入路由
 #include "core/ServerApp.h"      // 引入全局状态
 
-TcpListener::TcpListener(QObject *parent) : QTcpServer(parent) {}
+TcpListener::TcpListener(QObject *parent) : QTcpServer(parent) {
+    m_checkTimer = new QTimer(this);
+    m_checkTimer->setInterval(10000); 
+    connect(m_checkTimer, &QTimer::timeout, this, &TcpListener::onCheckHeartbeat);
+}
 
 bool TcpListener::start(int port) {
     if (!this->listen(QHostAddress::Any, port)) {
@@ -13,6 +18,9 @@ bool TcpListener::start(int port) {
         return false;
     }
     qDebug() << "服务端开始监听端口 " << port;
+
+    m_checkTimer->start();
+
     return true;
 }
 
@@ -61,5 +69,26 @@ void TcpListener::onClientDisconnected(ClientSocket* sender) {
 
     if (sender->userId() != -1) {
         ServerApp::instance().unregisterUser(sender->userId());
+    }
+}
+
+// 心跳检测逻辑
+void TcpListener::onCheckHeartbeat() {
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // 超时阈值：60秒 (允许丢失1个心跳包)
+    const qint64 timeoutThreshold = 60000; 
+    
+    QList<ClientSocket*> timeoutClients;
+
+    for (ClientSocket* client : m_clients) {
+        if (client && (now - client->lastActiveTime() > timeoutThreshold)) {
+            timeoutClients.append(client);
+        }
+    }
+
+    // 执行断开操作
+    for (ClientSocket* client : timeoutClients) {
+        qInfo() << "检测到僵尸连接 (User:" << client->userId() << ")，强制断开。";
+        client->disconnectFromHost(); 
     }
 }

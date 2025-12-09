@@ -6,11 +6,32 @@
 #include <QDebug>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QCryptographicHash>
+#include <QRandomGenerator>
 
 #include "DBManager.h"
 
-UserInfo UserDao::validateUser(
-    const QString& username, const QString& passwordHash)
+// 生成随机盐 (16字节转Hex)
+static QString generateSalt() {
+    const int saltLength = 16;
+    QByteArray saltData;
+    saltData.resize(saltLength);
+    // 使用 Qt6 全局随机生成器填满数据
+    QRandomGenerator::global()->fillRange(
+        reinterpret_cast<quint32*>(saltData.data()), 
+        saltLength / sizeof(quint32)
+    );
+    return QString(saltData.toHex());
+}
+
+// 计算加盐哈希
+static QString hashPassword(const QString& clientHash, const QString& salt) {
+    // 组合规则：ClientHash + Salt
+    QByteArray data = (clientHash + salt).toUtf8();
+    return QString(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+}
+
+UserInfo UserDao::validateUser(const QString& username, const QString& passwordHash)
 {
     UserInfo user;
     QSqlDatabase db = DBManager::instance().getMainDatabase();
@@ -20,20 +41,29 @@ UserInfo UserDao::validateUser(
     }
 
     QSqlQuery query(db);
-    // 数据库存的是 Hash 后的密码
-    query.prepare("SELECT id, role, real_name FROM users WHERE username = :u AND password = :p");
+    
+    query.prepare("SELECT id, role, real_name, password, salt FROM users WHERE username = :u");
     query.bindValue(":u", username);
-    query.bindValue(":p", passwordHash);
 
     if (query.exec()) {
         if (query.next()) {
-            user.id = query.value("id").toInt();
-            user.username = username;
-            user.role = query.value("role").toInt();
-            user.realName = query.value("real_name").toString();
-            qDebug() << "用户验证成功:" << username << "ID:" << user.id;
+            QString dbHash = query.value("password").toString();
+            QString dbSalt = query.value("salt").toString();
+
+            QString checkHash = hashPassword(passwordHash, dbSalt);
+
+            // 比对计算结果和数据库存储结果
+            if (checkHash == dbHash) {
+                user.id = query.value("id").toInt();
+                user.username = username;
+                user.role = query.value("role").toInt();
+                user.realName = query.value("real_name").toString();
+                qDebug() << "用户验证成功:" << username << "ID:" << user.id;
+            } else {
+                qDebug() << "密码错误:" << username;
+            }
         } else {
-            qDebug() << "用户验证失败，未找到匹配的用户:" << username;
+            qDebug() << "用户不存在:" << username;
         }
     } else {
         qCritical() << "登录查询失败:" << query.lastError().text();
@@ -41,8 +71,7 @@ UserInfo UserDao::validateUser(
     return user;
 }
 
-bool UserDao::isUsernameExist(
-    const QString& username)
+bool UserDao::isUsernameExist(const QString& username)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare("SELECT count(*) FROM users WHERE username = :u");
@@ -54,16 +83,20 @@ bool UserDao::isUsernameExist(
     return false;
 }
 
-int UserDao::addUser(
-    const QString& username, const QString& passwordHash, int role, const QString& realName)
+int UserDao::addUser(const QString& username, const QString& passwordHash, int role, const QString& realName)
 {
     QSqlDatabase db = DBManager::instance().getMainDatabase();
     QSqlQuery query(db);
 
-    query.prepare("INSERT INTO users (username, password, role, real_name) " "VALUES (:u, :p, :r, "
-                                                                             ":n) RETURNING id");
+    QString salt = generateSalt();
+    QString finalHash = hashPassword(passwordHash, salt);
+
+    query.prepare("INSERT INTO users (username, password, salt, role, real_name) "
+                  "VALUES (:u, :p, :s, :r, :n) RETURNING id");
+    
     query.bindValue(":u", username);
-    query.bindValue(":p", passwordHash);
+    query.bindValue(":p", finalHash); // 存加盐后的哈希
+    query.bindValue(":s", salt);      // 存盐
     query.bindValue(":r", role);
     query.bindValue(":n", realName);
 
@@ -79,8 +112,7 @@ int UserDao::addUser(
     return -1;
 }
 
-bool UserDao::addDoctorInfo(
-    int userId, const QString& intro, const QString& specializedField)
+bool UserDao::addDoctorInfo(int userId, const QString& intro, const QString& specializedField)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare(
@@ -93,12 +125,10 @@ bool UserDao::addDoctorInfo(
         qCritical() << "添加医生信息失败:" << query.lastError().text();
         return false;
     }
-    qDebug() << "医生信息添加成功，用户ID:" << userId;
     return true;
 }
 
-bool UserDao::deleteUser(
-    int userId)
+bool UserDao::deleteUser(int userId)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare("DELETE FROM users WHERE id = :id");
@@ -112,8 +142,7 @@ bool UserDao::deleteUser(
     return true;
 }
 
-int UserDao::getUserRole(
-    int userId)
+int UserDao::getUserRole(int userId)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare("SELECT role FROM users WHERE id = :id");
@@ -126,22 +155,30 @@ int UserDao::getUserRole(
     return -1; // Not found
 }
 
-bool UserDao::updateBasicInfo(
-    int userId, const QString& realName, const QString& passwordHash)
+bool UserDao::updateBasicInfo(int userId, const QString& realName, const QString& passwordHash)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
 
     QString sql = "UPDATE users SET real_name = :n";
+    
+    QString salt, finalHash;
+    
     if (!passwordHash.isEmpty()) {
-        sql += ", password = :p";
+        salt = generateSalt();
+        finalHash = hashPassword(passwordHash, salt);
+        
+        sql += ", password = :p, salt = :s";
     }
+    
     sql += " WHERE id = :id";
 
     query.prepare(sql);
     query.bindValue(":n", realName);
     query.bindValue(":id", userId);
+    
     if (!passwordHash.isEmpty()) {
-        query.bindValue(":p", passwordHash);
+        query.bindValue(":p", finalHash);
+        query.bindValue(":s", salt);
     }
 
     if (!query.exec()) {
@@ -152,8 +189,7 @@ bool UserDao::updateBasicInfo(
     return true;
 }
 
-bool UserDao::updateDoctorInfo(
-    int userId, const QString& intro, const QString& spec)
+bool UserDao::updateDoctorInfo(int userId, const QString& intro, const QString& spec)
 {
     QSqlQuery query(DBManager::instance().getMainDatabase());
     query.prepare(
@@ -170,8 +206,7 @@ bool UserDao::updateDoctorInfo(
     return true;
 }
 
-QJsonArray UserDao::getAllUsers(
-    int excludeId)
+QJsonArray UserDao::getAllUsers(int excludeId)
 {
     QJsonArray list;
     QSqlQuery query(DBManager::instance().getMainDatabase());
@@ -189,7 +224,6 @@ QJsonArray UserDao::getAllUsers(
             obj["role"] = query.value("role").toInt();
             list.append(obj);
         }
-        qDebug() << "获取所有用户成功，共" << list.size() << "个用户";
     } else {
         qWarning() << "获取所有用户失败:" << query.lastError().text();
     }
@@ -231,15 +265,13 @@ QJsonArray UserDao::getDoctorList()
             obj["specializedField"] = query.value("specialized_field").toString();
             list.append(obj);
         }
-        qDebug() << "获取医生列表成功，共" << list.size() << "名医生";
     } else {
         qWarning() << "获取医生列表失败:" << query.lastError().text();
     }
     return list;
 }
 
-QJsonObject UserDao::getDoctorDetail(
-    int doctorId)
+QJsonObject UserDao::getDoctorDetail(int doctorId)
 {
     QJsonObject obj;
     QSqlDatabase db = DBManager::instance().getMainDatabase();
@@ -249,18 +281,7 @@ QJsonObject UserDao::getDoctorDetail(
     }
 
     QSqlQuery query(db);
-    query
-        .prepare("SELECT u.id, u.real_name, u.username, d.intro, d.specialized_field " "FROM users "
-                                                                                       "u " "LEFT "
-                                                                                            "JOIN "
-                                                                                            "doctor"
-                                                                                            "_info "
-                                                                                            "d ON "
-                                                                                            "u.id "
-                                                                                            "= "
-                                                                                            "d."
-                                                                                            "user_"
-                                                                                            "id " "WHERE u.id = :id AND u.role = 2");
+    query.prepare("SELECT u.id, u.real_name, u.username, d.intro, d.specialized_field FROM users u LEFT JOIN doctor_info d ON u.id = d.user_id " "WHERE u.id = :id AND u.role = 2");
     query.bindValue(":id", doctorId);
 
     if (query.exec() && query.next()) {
@@ -269,7 +290,6 @@ QJsonObject UserDao::getDoctorDetail(
         obj["username"] = query.value("username").toString();
         obj["intro"] = query.value("intro").toString();
         obj["specializedField"] = query.value("specialized_field").toString();
-        qDebug() << "获取医生详情成功:" << obj["realName"].toString();
     } else {
         qWarning() << "获取医生详情失败，ID:" << doctorId << "错误:" << query.lastError().text();
     }

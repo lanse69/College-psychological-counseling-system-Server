@@ -121,6 +121,9 @@ void RequestRouter::dispatch(
             // 医生排班与信息（待扩展）
             // TODO: 补充 DoctorHandler::handleUpdateSchedule 等
 
+        case CmdType::HEARTBEAT:
+            break;
+
             // 其他未处理的命令
         default:
             qWarning() << "未知或未处理的命令:" << cmdVal;

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QTcpSocket>
 #include <QJsonObject>
+#include <QDateTime>
 
 class ClientSocket : public QObject {
     Q_OBJECT
@@ -17,6 +18,11 @@ public:
 
     // 主动断开连接
     void disconnectFromHost();
+
+    // 获取最后活跃时间
+    qint64 lastActiveTime() const;
+    // 更新活跃时间
+    void updateActiveTime();
 
 signals:
     // 解析出完整的 JSON 包后发出信号，由 RequestRouter 处理
@@ -36,4 +42,5 @@ private:
     QTcpSocket *m_socket;
     QByteArray m_buffer; // 接收缓冲区
     int m_userId;   // 关联的用户ID
+    qint64 m_lastActiveTime;
 };

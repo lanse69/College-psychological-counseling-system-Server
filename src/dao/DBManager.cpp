@@ -1,6 +1,8 @@
 #include "DBManager.h"
 
 #include <QCryptographicHash>
+#include <QRandomGenerator>
+#include <QDebug>
 
 #include "core/ConfigManager.h"
 
@@ -152,6 +154,7 @@ bool DBManager::initTables()
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL,
+            salt VARCHAR(64) DEFAULT '', 
             role INT NOT NULL,
             real_name VARCHAR(50),
             gender VARCHAR(10),
@@ -213,7 +216,7 @@ bool DBManager::initTables()
             time_slot INT NOT NULL,
             status INT DEFAULT 0,
             create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            modify_request_json JSON,
+            modify_request_json JSONB,
             FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
         );
@@ -226,7 +229,7 @@ bool DBManager::initTables()
             id SERIAL PRIMARY KEY,
             doctor_id INT NOT NULL,
             title VARCHAR(100) NOT NULL,
-            content_json JSON NOT NULL,
+            content_json JSONB NOT NULL,
             create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
         );
@@ -239,7 +242,7 @@ bool DBManager::initTables()
             id SERIAL PRIMARY KEY,
             appt_id INT NOT NULL,
             student_id INT NOT NULL,
-            answers_json JSON NOT NULL,
+            answers_json JSONB NOT NULL,
             submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (appt_id) REFERENCES appointments(id) ON DELETE CASCADE,
             FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
@@ -260,14 +263,27 @@ bool DBManager::initTables()
         );
     )");
 
+    // 创建 GIN 索引
+    if (success) {
+        QSqlQuery query(m_mainDb);
+        
+        // 为问卷内容的 JSONB 创建 GIN 索引
+        if (!query.exec("CREATE INDEX IF NOT EXISTS idx_surveys_content ON surveys USING GIN (content_json)")) {
+            qWarning() << "警告: 创建 surveys GIN 索引失败:" << query.lastError().text();
+        }
+
+        // 为学生回答的 JSONB 创建 GIN 索引
+        if (!query.exec("CREATE INDEX IF NOT EXISTS idx_survey_answers ON survey_answers USING GIN (answers_json)")) {
+            qWarning() << "警告: 创建 survey_answers GIN 索引失败:" << query.lastError().text();
+        }
+    }
+
     // 为 users 表的 role 字段创建索引
     QSqlQuery query(m_mainDb);
     QString createIndexSql = "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)";
     
     if (!query.exec(createIndexSql)) {
         qWarning() << "警告: 创建 role 索引失败 (不影响主流程):" << query.lastError().text();
-    } else {
-        qDebug() << "索引 idx_users_role 检查/创建完成";
     }
 
     // 初始化默认数据
@@ -278,8 +294,7 @@ bool DBManager::initTables()
     return success;
 }
 
-bool DBManager::createTable(
-    const QString &tableName, const QString &sql)
+bool DBManager::createTable(const QString &tableName, const QString &sql)
 {
     QSqlQuery query(m_mainDb);
     if (!query.exec(sql)) {
@@ -292,18 +307,36 @@ bool DBManager::createTable(
 void DBManager::seedDefaultAdmin()
 {
     QSqlQuery query(m_mainDb);
+    
+    // 检查是否已经存在管理员
     query.exec("SELECT count(*) FROM users WHERE role = 3");
     if (query.next() && query.value(0).toInt() > 0) {
         return;
     }
 
     qDebug() << "植入默认管理员账户...";
+
+    QString rawPassword = "123456";
+    QString clientHash = QString(QCryptographicHash::hash(rawPassword.toUtf8(), QCryptographicHash::Sha256).toHex());
+
+    const int saltLength = 16;
+    QByteArray saltData;
+    saltData.resize(saltLength);
+    // 使用 Qt 全局随机生成器填充数据
+    QRandomGenerator::global()->fillRange(
+        reinterpret_cast<quint32*>(saltData.data()), 
+        saltLength / sizeof(quint32)
+    );
+    QString salt = QString(saltData.toHex());
+
+    QString finalHash = QString(QCryptographicHash::hash((clientHash + salt).toUtf8(), QCryptographicHash::Sha256).toHex());
+
     query.prepare(
-        "INSERT INTO users (username, password, role, real_name) VALUES (:u, :p, :r, :n)");
+        "INSERT INTO users (username, password, salt, role, real_name) VALUES (:u, :p, :s, :r, :n)");
+    
     query.bindValue(":u", "admin");
-    QString hashedPassword = QString(
-        QCryptographicHash::hash("123456", QCryptographicHash::Sha256).toHex());
-    query.bindValue(":p", hashedPassword);
+    query.bindValue(":p", finalHash);
+    query.bindValue(":s", salt);
     query.bindValue(":r", 3);
     query.bindValue(":n", "System Admin");
 
