@@ -103,16 +103,13 @@ bool DBManager::connectToDatabase()
     return true;
 }
 
-QSqlDatabase DBManager::openThreadConnection(
-    QString &connectionName)
+QSqlDatabase DBManager::openThreadConnection(QString &connectionName)
 {
-    // 生成唯一的连接名
+    // 使用 UUID 确保连接名在整个程序生命周期内唯一，防止线程间冲突
     connectionName = QString("ThreadConn_%1").arg(QUuid::createUuid().toString());
 
     // 添加数据库
     QSqlDatabase db = QSqlDatabase::addDatabase("QPSQL", connectionName);
-
-    // 读取配置
     const DBConfig &config = ConfigManager::instance().db();
 
     db.setHostName(config.host);
@@ -122,24 +119,21 @@ QSqlDatabase DBManager::openThreadConnection(
     db.setDatabaseName(config.dbName);
 
     if (!db.open()) {
-        qWarning() << "线程连接数据库失败:" << db.lastError().text();
+        qCritical() << "线程连接数据库失败 [" << connectionName << "]:" << db.lastError().text();
     }
-
     return db;
 }
 
-void DBManager::closeThreadConnection(
-    const QString &connectionName)
+void DBManager::closeThreadConnection(const QString &connectionName)
 {
-    // 必须先让 QSqlDatabase 对象超出作用域或不再被持有，才能 removeDatabase
+    // 获取数据库对象
     {
         QSqlDatabase db = QSqlDatabase::database(connectionName);
         if (db.isOpen()) {
             db.close();
         }
-    } // db 在此处析构
-
-    // 移除连接定义
+    } 
+    // 必须让 db 对象超出作用域销毁后，才能调用 removeDatabase
     QSqlDatabase::removeDatabase(connectionName);
 }
 

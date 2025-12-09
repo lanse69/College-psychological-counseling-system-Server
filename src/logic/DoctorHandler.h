@@ -66,16 +66,26 @@ public:
     static void handleCompleteConsultation(ClientSocket* sender, const QJsonObject& request);
 
     /**
-     * @brief 处理医生获取患者列表请求
+     * @brief 处理医生获取预约学生列表请求
      * @param sender 请求发送者（ClientSocket）
      * @param request 请求JSON对象
      */
     static void handleGetPatients(ClientSocket* sender, const QJsonObject& request);
 
     /**
-     * @brief 处理获取患者历史记录请求
+     * @brief 处理获取预约学生历史记录请求
      */
     static void handleGetPatientHistory(ClientSocket* sender, const QJsonObject& request);
+
+    /**
+     * @brief 获取排班信息
+     */
+    static void handleGetSchedule(ClientSocket* sender, const QJsonObject& request);
+
+    /**
+     * @brief 更新排班信息
+     */
+    static void handleUpdateSchedule(ClientSocket* sender, const QJsonObject& request);
 
 private:
     /**

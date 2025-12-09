@@ -91,6 +91,9 @@ void RequestRouter::dispatch(
         case CmdType::ADMIN_DEL_USER:
             AdminHandler::handleDeleteUser(sender, request);
             break;
+        case CmdType::UPDATE_USER_INFO:
+            AdminHandler::handleUpdateUserInfo(sender, request);
+            break;
         case CmdType::GET_STATISTICS:
             AdminHandler::handleGetStatistics(sender, request);
             break;
@@ -109,17 +112,26 @@ void RequestRouter::dispatch(
             DoctorHandler::handleGetPatientHistory(sender, request);
             break;
 
-        // 学生端医生
         case CmdType::STUDENT_GET_DOCTOR_LIST:
             DoctorHandler::handleStudentGetDoctorList(sender, request);
             break;
         case CmdType::STUDENT_SUBMIT_SURVEY:
-            // SurveyHandler::handleSubmitSurvey(sender, request);
-            qWarning() << "STUDENT_SUBMIT_SURVEY 待实现";
+            // SurveyHandler::handleStudentSubmitSurvey(sender, request);
             break;
 
-            // 医生排班与信息（待扩展）
-            // TODO: 补充 DoctorHandler::handleUpdateSchedule 等
+        // 医生/管理员获取排班表
+        case CmdType::GET_DOCTOR_SCHEDULE:
+            DoctorHandler::handleGetSchedule(sender, request);
+            break;
+
+        // 医生修改排班设置
+        case CmdType::UPDATE_SCHEDULE:
+            DoctorHandler::handleUpdateSchedule(sender, request);
+            break;
+
+        case CmdType::GET_USER_INFO:
+             AuthHandler::handleGetUserInfo(sender, request);
+             break;
 
         case CmdType::HEARTBEAT:
             break;

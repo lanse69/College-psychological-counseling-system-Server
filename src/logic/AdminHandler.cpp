@@ -1,205 +1,195 @@
 #include "AdminHandler.h"
 
-#include <QtConcurrent>
 #include <QJsonArray>
-#include <QPointer>
 #include <QDebug>
-#include <QCoreApplication>
+#include <QDateTime>
 
 #include "dao/UserDao.h"
 #include "dao/DBManager.h"
 #include "network/ClientSocket.h"
 #include "core/ProtocolDefs.h"
 #include "core/ServerApp.h"
+#include "core/AsyncExecutor.h"
 
-bool AdminHandler::checkAdminPermission(ClientSocket* sender) {
-    if (!sender) return false;
-    int role = UserDao::getUserRole(sender->userId());
-    return role == (int)UserRole::ADMIN;
+// 发送通用响应
+static void sendResponse(ClientSocket* sender, int cmd, int code, const QString& msg, const QJsonValue& data = QJsonValue()) {
+    if (!sender) return;
+    QJsonObject response;
+    response[JsonKeys::CMD] = cmd;
+    response[JsonKeys::CODE] = code;
+    response[JsonKeys::MSG] = msg;
+    if (!data.isNull()) {
+        response[JsonKeys::DATA] = data;
+    }
+    sender->sendJson(response);
+}
+
+// 检查是否为管理员
+static bool isUserAdmin(QSqlDatabase db, int userId) {
+    return UserDao::getUserRole(db, userId) == (int)UserRole::ADMIN;
 }
 
 void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& request) {
-    if (!checkAdminPermission(sender)) {
-        QJsonObject err;
-        err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
-        err[JsonKeys::MSG] = "无权操作";
-        sender->sendJson(err);
-        return;
-    }
-
+    int operatorId = sender->userId();
+    int cmd = request[JsonKeys::CMD].toInt();
     QJsonObject data = request[JsonKeys::DATA].toObject();
+
+    // 提取参数
     QString username = data[JsonKeys::USERNAME].toString();
     QString passHash = data[JsonKeys::PASSWORD].toString();
     QString realName = data[JsonKeys::REAL_NAME].toString();
     int role = data[JsonKeys::ROLE].toInt();
+    QString intro = data[JsonKeys::INTRO].toString();
+    QString spec = data[JsonKeys::SPEC].toString();
 
-    QJsonObject response;
-    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+    AsyncExecutor::run(sender,
+        [operatorId, username, passHash, realName, role, intro, spec](QSqlDatabase db) -> QPair<int, QString> {
+            
+            // 权限校验
+            if (!isUserAdmin(db, operatorId)) {
+                return {StatusCode::FORBIDDEN, "无权操作"};
+            }
 
-    // 检查参数
-    if (username.isEmpty() || passHash.isEmpty()) {
-        response[JsonKeys::CODE] = (int)StatusCode::BAD_REQUEST;
-        response[JsonKeys::MSG] = "用户名或密码不能为空";
-        sender->sendJson(response);
-        return;
-    }
+            // 参数校验
+            if (username.isEmpty() || passHash.isEmpty()) {
+                return {StatusCode::BAD_REQUEST, "用户名或密码不能为空"};
+            }
 
-    // 检查用户是否存在
-    if (UserDao::isUsernameExist(username)) {
-        response[JsonKeys::CODE] = (int)StatusCode::CONFLICT; // Conflict
-        response[JsonKeys::MSG] = "用户名已存在";
-        sender->sendJson(response);
-        return;
-    }
+            // 业务逻辑
+            if (UserDao::isUsernameExist(db, username)) {
+                return {StatusCode::CONFLICT, "用户名已存在"};
+            }
 
-    // 执行插入
-    int newId = UserDao::addUser(username, passHash, role, realName);
-
-    if (newId != -1) {
-        // 医生需要插入 doctor_info
-        if (role == (int)UserRole::DOCTOR) {
-            QString intro = data[JsonKeys::INTRO].toString();
-            QString spec = data[JsonKeys::SPEC].toString();
-            UserDao::addDoctorInfo(newId, intro, spec);
+            int newId = UserDao::addUser(db, username, passHash, role, realName);
+            if (newId != -1) {
+                if (role == (int)UserRole::DOCTOR) {
+                    UserDao::addDoctorInfo(db, newId, intro, spec);
+                }
+                return {StatusCode::SUCCESS, "添加用户成功"};
+            }
+            return {StatusCode::INTERNAL_ERROR, "数据库插入失败"};
+        },
+        [sender, cmd](QPair<int, QString> result) {
+            // 主线程回调
+            sendResponse(sender, cmd, result.first, result.second);
         }
-
-        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-        response[JsonKeys::MSG] = "添加用户成功";
-    } else {
-        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
-        response[JsonKeys::MSG] = "数据库插入失败";
-    }
-
-    sender->sendJson(response);
+    );
 }
 
 void AdminHandler::handleDeleteUser(ClientSocket* sender, const QJsonObject& request) {
-    if (!checkAdminPermission(sender)) {
-        QJsonObject err;
-        err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
-        err[JsonKeys::MSG] = "无权操作";
-        sender->sendJson(err);
-        return;
-    }
-
+    int operatorId = sender->userId();
+    int cmd = request[JsonKeys::CMD].toInt();
+    
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int targetId = data[JsonKeys::TARGET_ID].toInt();
 
-    QJsonObject response;
-    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+    AsyncExecutor::run(sender,
+        [operatorId, targetId](QSqlDatabase db) -> QPair<int, QString> {
+            // 权限校验
+            if (!isUserAdmin(db, operatorId)) return {StatusCode::FORBIDDEN, "无权操作"};
+            
+            // 校验参数
+            if (targetId <= 0) return {StatusCode::BAD_REQUEST, "无效的用户ID"};
+            if (targetId == operatorId) return {StatusCode::BAD_REQUEST, "不能删除自己"};
 
-    if (targetId <= 0) {
-        response[JsonKeys::CODE] = (int)StatusCode::BAD_REQUEST;
-        response[JsonKeys::MSG] = "无效的用户ID";
-        sender->sendJson(response);
-        return;
-    }
-
-    // 该用户在线则强制踢下线
-    ClientSocket* targetSocket = ServerApp::instance().getClient(targetId);
-    if (targetSocket) {
-        QJsonObject kickMsg;
-        kickMsg[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
-        kickMsg[JsonKeys::MSG] = "管理员删除了您的账号，连接断开。";
-        targetSocket->sendJson(kickMsg);
-        // ServerApp::unregisterUser 会在 socket 断开时自动调用
-        targetSocket->deleteLater();
-    }
-
-    // 删库
-    if (UserDao::deleteUser(targetId)) {
-        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-        response[JsonKeys::MSG] = "用户删除成功";
-    } else {
-        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
-        response[JsonKeys::MSG] = "删除失败，ID可能不存在";
-    }
-
-    sender->sendJson(response);
+            // 执行删除
+            if (UserDao::deleteUser(db, targetId)) {
+                return {StatusCode::SUCCESS, "用户删除成功"};
+            }
+            return {StatusCode::INTERNAL_ERROR, "删除失败，ID可能不存在"};
+        },
+        [sender, cmd, targetId](QPair<int, QString> result) {
+            // 如果删除成功，需要处理被删除用户的在线连接
+            if (result.first == StatusCode::SUCCESS) {
+                ClientSocket* targetSocket = ServerApp::instance().getClient(targetId);
+                if (targetSocket) {
+                    QJsonObject kickMsg;
+                    kickMsg[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    kickMsg[JsonKeys::CODE] = (int)StatusCode::CONFLICT;
+                    kickMsg[JsonKeys::MSG] = "管理员删除了您的账号，连接断开。";
+                    targetSocket->sendJson(kickMsg);
+                    // 稍后断开，确保消息发出
+                    QTimer::singleShot(100, targetSocket, &ClientSocket::disconnectFromHost);
+                }
+            }
+            sendResponse(sender, cmd, result.first, result.second);
+        }
+    );
 }
 
 void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject& request) {
-    if (!checkAdminPermission(sender)) {
-        QJsonObject err;
-        err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
-        err[JsonKeys::MSG] = "无权操作";
-        sender->sendJson(err);
-        return;
-    }
+    int operatorId = sender->userId();
+    int cmd = request[JsonKeys::CMD].toInt();
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int targetId = data[JsonKeys::TARGET_ID].toInt();
     QString realName = data[JsonKeys::REAL_NAME].toString();
     QString passHash = data[JsonKeys::PASSWORD].toString();
-
-    // 医生特有字段
     QString intro = data[JsonKeys::INTRO].toString();
     QString spec = data[JsonKeys::SPEC].toString();
 
-    QJsonObject response;
-    response[JsonKeys::CMD] = request[JsonKeys::CMD];
+    struct UpdateResult {
+        int code;
+        QString msg;
+        bool passChanged;
+    };
 
-    // 更新基础表 (users)
-    bool success = UserDao::updateBasicInfo(targetId, realName, passHash);
+    AsyncExecutor::run(sender,
+        [=](QSqlDatabase db) -> UpdateResult {
+            if (!isUserAdmin(db, operatorId)) return {StatusCode::FORBIDDEN, "无权操作", false};
 
-    // 是医生则更新详情表
-    int targetRole = UserDao::getUserRole(targetId);
-    if (success && targetRole == (int)UserRole::DOCTOR) {
-        success &= UserDao::updateDoctorInfo(targetId, intro, spec);
-    }
-
-    if (success) {
-        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-        response[JsonKeys::MSG] = "用户信息更新成功";
-
-        // 通知目标用户
-        ClientSocket* targetClient = ServerApp::instance().getClient(targetId);
-        if (targetClient) {
-            QJsonObject notify;
-            notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
-            notify[JsonKeys::MSG] = "您的个人信息已被管理员修改，请刷新查看。";
-            if (!passHash.isEmpty()) {
-                notify[JsonKeys::MSG] = "您的密码已被管理员重置，请重新登录。";
-                targetClient->deleteLater();
+            bool success = UserDao::updateBasicInfo(db, targetId, realName, passHash);
+            
+            // 医生需要更新详细信息
+            int targetRole = UserDao::getUserRole(db, targetId);
+            if (success && targetRole == (int)UserRole::DOCTOR) {
+                success &= UserDao::updateDoctorInfo(db, targetId, intro, spec);
             }
-            targetClient->sendJson(notify);
+
+            if (success) {
+                return {StatusCode::SUCCESS, "用户信息更新成功", !passHash.isEmpty()};
+            }
+            return {StatusCode::INTERNAL_ERROR, "更新失败", false};
+        },
+        [sender, cmd, targetId](UpdateResult res) {
+            // 推送通知给目标用户
+            if (res.code == StatusCode::SUCCESS) {
+                ClientSocket* targetClient = ServerApp::instance().getClient(targetId);
+                if (targetClient) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    
+                    if (res.passChanged) {
+                        notify[JsonKeys::MSG] = "您的密码已被管理员重置，请重新登录。";
+                        notify[JsonKeys::CODE] = (int)StatusCode::CONFLICT; // 强制下线码
+                        targetClient->sendJson(notify);
+                        QTimer::singleShot(100, targetClient, &ClientSocket::disconnectFromHost);
+                    } else {
+                        notify[JsonKeys::MSG] = "您的个人信息已被管理员修改，请刷新查看。";
+                        targetClient->sendJson(notify);
+                    }
+                }
+            }
+            sendResponse(sender, cmd, res.code, res.msg);
         }
-
-    } else {
-        response[JsonKeys::CODE] = (int)StatusCode::INTERNAL_ERROR;
-        response[JsonKeys::MSG] = "更新失败，数据库错误或ID不存在";
-    }
-
-    sender->sendJson(response);
+    );
 }
 
-void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& req) {
-    // 使用 QPointer 弱引用 ClientSocket，防止悬空指针
-    QPointer<ClientSocket> safeClient(client); 
-
-    // 预先解析请求数据，避免在子线程中访问 QJsonObject 的隐式共享深拷贝问题
-    QJsonObject data = req[JsonKeys::DATA].toObject();
+void AdminHandler::handleGetStatistics(ClientSocket* sender, const QJsonObject& request) {
+    int operatorId = sender->userId();
+    int cmd = request[JsonKeys::CMD].toInt();
+    QJsonObject data = request[JsonKeys::DATA].toObject();
     QString statType = data["type"].toString();
-    int cmd = req[JsonKeys::CMD].toInt();
 
-    // 启动子线程执行耗时数据库查询
-    QFuture<void> ignoredFuture = QtConcurrent::run([safeClient, statType, cmd]() {
-        // 早期检查：如果刚进子线程客户端就断了，直接退出节省资源
-        if (!safeClient) return;
+    AsyncExecutor::run(sender,
+        [operatorId, statType](QSqlDatabase db) -> QPair<int, QJsonValue> {
+            if (!isUserAdmin(db, operatorId)) return {StatusCode::FORBIDDEN, QJsonValue()};
 
-        // 获取独立数据库连接
-        QString connName;
-        QSqlDatabase db = DBManager::instance().openThreadConnection(connName);
-        QJsonArray resultMap; 
-
-        if (db.isOpen()) {
+            QJsonArray resultArray;
             QSqlQuery query(db);
-            
+
             if (statType == "consult_trend") {
-                // 统计最近12个月的咨询趋势
+                // 统计最近12个月
                 QString sql = R"(
                     SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)
                     FROM appointments
@@ -212,13 +202,11 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
                         QJsonObject item;
                         item["label"] = query.value(0).toString();
                         item["value"] = query.value(1).toInt();
-                        resultMap.append(item);
+                        resultArray.append(item);
                     }
-                } else {
-                    qWarning() << "统计查询失败(consult_trend):" << query.lastError().text();
                 }
             } else if (statType == "common_issues") {
-                // 统计常见问题 Tag
+                // 统计 Tag
                 QString sql = R"(
                     SELECT result_tags, COUNT(*)
                     FROM consultation_records
@@ -229,52 +217,38 @@ void AdminHandler::handleGetStatistics(ClientSocket* client, const QJsonObject& 
                 if (query.exec(sql)) {
                     while(query.next()) {
                         QJsonObject item;
-                        item["label"] = query.value(0).toString(); 
+                        item["label"] = query.value(0).toString();
                         item["value"] = query.value(1).toInt();
-                        resultMap.append(item);
+                        resultArray.append(item);
                     }
                 }
-            } // TODO else
-        }
-
-        // 关闭独立连接
-        DBManager::instance().closeThreadConnection(connName);
-
-        // 准备回包数据
-        QJsonObject response;
-        response[JsonKeys::CMD] = cmd;
-        response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-        response[JsonKeys::DATA] = resultMap;
-
-        // 切换回主线程发送数据
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [safeClient, response]() {
-            // 安全检查：发送前确认客户端还活着
-            if (safeClient) {
-                safeClient->sendJson(response);
-                qDebug() << "统计报表发送成功，数据条数:" << response[JsonKeys::DATA].toArray().size();
-            } else {
-                qDebug() << "统计查询完成，但客户端已断开连接，数据丢弃。";
             }
-        });
-    });
+            // 还有其他类型可扩展...
+
+            return {StatusCode::SUCCESS, resultArray};
+        },
+        [sender, cmd](QPair<int, QJsonValue> result) {
+            sendResponse(sender, cmd, result.first, 
+                         result.first == StatusCode::SUCCESS ? "获取成功" : "获取失败", 
+                         result.second);
+        }
+    );
 }
 
 void AdminHandler::handleGetUserList(ClientSocket* sender, const QJsonObject& request) {
-    if (!checkAdminPermission(sender)) {
-        QJsonObject err;
-        err[JsonKeys::CMD] = request[JsonKeys::CMD];
-        err[JsonKeys::CODE] = (int)StatusCode::FORBIDDEN;
-        err[JsonKeys::MSG] = "无权操作";
-        sender->sendJson(err);
-        return;
-    }
+    int operatorId = sender->userId();
+    int cmd = request[JsonKeys::CMD].toInt();
 
-    QJsonArray userList = UserDao::getAllUsers(sender->userId());
-
-    QJsonObject response;
-    response[JsonKeys::CMD] = request[JsonKeys::CMD];
-    response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-    response[JsonKeys::DATA] = userList;
-
-    sender->sendJson(response);
+    AsyncExecutor::run(sender,
+        [operatorId](QSqlDatabase db) -> QPair<int, QJsonValue> {
+            if (!isUserAdmin(db, operatorId)) {
+                return {StatusCode::FORBIDDEN, QJsonValue()};
+            }
+            QJsonArray list = UserDao::getAllUsers(db, operatorId);
+            return {StatusCode::SUCCESS, list};
+        },
+        [sender, cmd](QPair<int, QJsonValue> result) {
+            sendResponse(sender, cmd, result.first, "获取用户列表成功", result.second);
+        }
+    );
 }

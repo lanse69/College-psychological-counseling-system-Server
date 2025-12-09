@@ -6,30 +6,23 @@
 #include <QDebug>
 #include <QDate>
 
+#include "core/AsyncExecutor.h"
 #include "dao/DBManager.h"
 #include "dao/AppointmentDao.h"
-#include "dao/ScheduleDao.h"
+#include "dao/UserDao.h"
 #include "core/ProtocolDefs.h"
 #include "core/ServerApp.h"
 #include "network/ClientSocket.h"
-#include "dao/UserDao.h"
 
 void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject& request)
 {
-    // 检查用户是否登录
+    // 基础校验
     int userId = sender->userId();
     if (userId == -1) {
         sendErrorResponse(sender, request, StatusCode::UNAUTHORIZED, "用户未登录");
         return;
     }
 
-    int role = UserDao::getUserRole(userId);
-    if (role != (int)UserRole::STUDENT) {
-        sendErrorResponse(sender, request, StatusCode::FORBIDDEN, "只有学生可以发起预约");
-        return;
-    }
-
-    // 解析请求数据
     if (!request.contains(JsonKeys::DATA)) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "缺少数据字段");
         return;
@@ -37,9 +30,8 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
 
-    // 验证必需参数
-    if (!data.contains(JsonKeys::DOCTOR_ID) || !data.contains("date")
-        || !data.contains("timeSlot")) {
+    // 校验参数存在性
+    if (!data.contains(JsonKeys::DOCTOR_ID) || !data.contains("date") || !data.contains("timeSlot")) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "缺少必需参数");
         return;
     }
@@ -48,159 +40,163 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
     QString dateStr = data["date"].toString();
     int timeSlot = data["timeSlot"].toInt();
 
-    // 参数验证
-    if (doctorId <= 0 || dateStr.isEmpty() || 
-        timeSlot < 0 || timeSlot > MAX_TIME_SLOT_INDEX) {
-        
-        QString errInfo = QString("参数错误: 医生ID(%1), 日期(%2), 时段索引(%3)")
-                          .arg(doctorId).arg(dateStr).arg(timeSlot);
-        qWarning() << "非法预约请求:" << errInfo;
-        
-        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "请求参数错误或时段无效");
+    // 校验参数逻辑合法性
+    if (doctorId <= 0 || dateStr.isEmpty() || timeSlot < 0 || timeSlot > MAX_TIME_SLOT_INDEX) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数格式错误或时间段无效");
         return;
     }
-    
-    // 尝试使用标准 ISO 格式 (YYYY-MM-DD) 解析
+
+    // 校验日期格式
     QDate qDate = QDate::fromString(dateStr, Qt::ISODate);
+    if (!qDate.isValid()) qDate = QDate::fromString(dateStr, "yyyy/MM/dd");
+    if (!qDate.isValid()) qDate = QDate::fromString(dateStr, "yyyy-M-d");
 
-    // 标准解析失败，尝试解析常见的替代格式
-    if (!qDate.isValid()) {
-        qDate = QDate::fromString(dateStr, "yyyy/MM/dd");
-    }
-
-    // 校验日期有效性
     if (!qDate.isValid()) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "日期格式无效，请使用 YYYY-MM-DD 格式");
         return;
     }
 
-    // 校验是否是过去的时间
     if (qDate < QDate::currentDate()) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "不能预约过去的日期");
         return;
     }
 
-    // 统一转换为标准字符串存入数据库
+    // 转换为标准字符串
     QString formattedDate = qDate.toString(Qt::ISODate);
 
-    ScheduleDao scheduleDao;
-    if (!scheduleDao.isSlotAvailable(doctorId, QDate::fromString(formattedDate, Qt::ISODate), timeSlot)) {
-         sendErrorResponse(sender, request, StatusCode::CONFLICT, "医生该时段已设置为忙碌/休息");
-         return;
-    }
+    AsyncExecutor::run(sender,
+        [userId, doctorId, formattedDate, timeSlot](QSqlDatabase db) -> QPair<bool, QString> {
+            
+            // 检查角色
+            int role = UserDao::getUserRole(db, userId);
+            if (role != (int)UserRole::STUDENT) {
+                return {false, "只有学生可以发起预约"};
+            }
 
-    // 创建预约
-    AppointmentDao dao;
-    QString errorMsg;
-    bool success = dao.createAppointment(userId, doctorId, formattedDate, timeSlot, errorMsg);
-
-    if (success) {
-        sendSuccessResponse(sender, request, "预约创建成功");
-    } else {
-        sendErrorResponse(sender, request, StatusCode::CONFLICT, errorMsg);
-    }
-}
-
-// 学生修改预约：校验医生时间表
-void BookingHandler::handleModifyBookingDirect(ClientSocket* sender, const QJsonObject& request)
-{
-    // 暂时返回未实现
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
-}
-
-// 医生发起修改请求：需学生同意
-void BookingHandler::handleModifyRequest(ClientSocket* sender, const QJsonObject& request)
-{
-    // 暂时返回未实现
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
-}
-
-// 学生回复修改请求
-void BookingHandler::handleModifyReply(ClientSocket* sender, const QJsonObject& request)
-{
-    // 暂时返回未实现
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+            AppointmentDao dao;
+            QString errorMsg;
+            // 执行预约
+            bool success = dao.createAppointment(db, userId, doctorId, formattedDate, timeSlot, errorMsg);
+            
+            if (success) {
+                // TODO：推送给医生
+            }
+            
+            return {success, success ? "预约成功！请按时咨询" : errorMsg};
+        },
+        
+        // 主线程回调
+        [sender, request, doctorId](QPair<bool, QString> result) {
+            if (result.first) {
+                sendSuccessResponse(sender, request, result.second);
+                
+                // 推送通知给医生
+                ClientSocket* docSocket = ServerApp::instance().getClient(doctorId);
+                if (docSocket) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    notify[JsonKeys::CODE] = 200;
+                    notify[JsonKeys::MSG] = "您有一个新的预约（系统自动确认）";
+                    docSocket->sendJson(notify);
+                }
+            } else {
+                sendErrorResponse(sender, request, StatusCode::CONFLICT, result.second);
+            }
+        }
+    );
 }
 
 void BookingHandler::handleCancelBooking(ClientSocket* sender, const QJsonObject& request)
 {
-    // 检查用户是否登录
+    // 基础校验
     int userId = sender->userId();
     if (userId == -1) {
         sendErrorResponse(sender, request, StatusCode::UNAUTHORIZED, "用户未登录");
         return;
     }
 
-    // 解析请求数据
     if (!request.contains(JsonKeys::DATA)) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "缺少数据字段");
         return;
     }
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
-
-    // 验证必需参数
     if (!data.contains(JsonKeys::APPOINTMENT_ID)) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "缺少预约ID");
         return;
     }
 
     int appointmentId = data[JsonKeys::APPOINTMENT_ID].toInt();
-
     if (appointmentId <= 0) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "预约ID无效");
         return;
     }
 
-    // 取消预约
-    AppointmentDao dao;
-    QString errorMsg;
-    bool success = dao.cancelAppointment(appointmentId, errorMsg);
+    AsyncExecutor::run(sender,
+        [appointmentId](QSqlDatabase db) -> QPair<bool, QString> {
+            AppointmentDao dao;
+            QString errorMsg;
+            bool success = dao.cancelAppointment(db, appointmentId, errorMsg);
+            return {success, success ? "预约取消成功" : errorMsg};
+        },
 
-    if (success) {
-        sendSuccessResponse(sender, request, "预约取消成功");
-        qDebug() << "预约取消成功";
-    } else {
-        sendErrorResponse(sender, request, StatusCode::INTERNAL_ERROR, errorMsg);
-        qDebug() << "预约取消失败:" << errorMsg;
-    }
+        [sender, request](QPair<bool, QString> result) {
+            if (result.first) {
+                sendSuccessResponse(sender, request, result.second);
+            } else {
+                sendErrorResponse(sender, request, StatusCode::INTERNAL_ERROR, result.second);
+            }
+        }
+    );
 }
 
-void BookingHandler::handleGetMyBookings(
-    ClientSocket* sender, const QJsonObject& request)
+void BookingHandler::handleGetMyBookings(ClientSocket* sender, const QJsonObject& request)
 {
-    // 检查用户是否登录
+    // 基础校验
     int userId = sender->userId();
-
     if (userId == -1) {
-        qWarning() << "警告: 用户未登录";
         sendErrorResponse(sender, request, StatusCode::UNAUTHORIZED, "用户未登录");
         return;
     }
 
-    // 获取预约列表
-    AppointmentDao dao;
-    QString errorMsg;
-    QJsonArray appointments = dao.getStudentAppointments(userId, errorMsg);
+    AsyncExecutor::run(sender,
+        [userId](QSqlDatabase db) -> QJsonArray {
+            AppointmentDao dao;
+            QString errorMsg;
+            QJsonArray list = dao.getStudentAppointments(db, userId, errorMsg);
+            
+            if (!errorMsg.isEmpty()) {
+                qWarning() << "查询预约失败:" << errorMsg;
+            }
+            return list;
+        },
 
-    if (!errorMsg.isEmpty()) {
-        qWarning() << "学生预约数据库查询失败:" << errorMsg;
-        sendErrorResponse(sender, request, StatusCode::INTERNAL_ERROR, errorMsg);
-        qDebug() << "获取预约列表失败:" << errorMsg;
-        return;
-    }
-
-    // 发送成功响应和数据
-    sendSuccessResponse(sender, request, "获取预约列表成功");
-    QJsonObject response;
-    response[JsonKeys::CMD] = request[JsonKeys::CMD];
-    response[JsonKeys::CODE] = StatusCode::SUCCESS;
-    response[JsonKeys::MSG] = "获取预约列表成功";
-    response[JsonKeys::DATA] = appointments;
-    sender->sendJson(response);
+        [sender, request](QJsonArray appointments) {
+            QJsonObject response;
+            response[JsonKeys::CMD] = request[JsonKeys::CMD];
+            response[JsonKeys::CODE] = StatusCode::SUCCESS;
+            response[JsonKeys::MSG] = "获取预约列表成功";
+            response[JsonKeys::DATA] = appointments;
+            sender->sendJson(response);
+        }
+    );
 }
 
-// 发送成功响应
+void BookingHandler::handleModifyBookingDirect(ClientSocket* sender, const QJsonObject& request)
+{
+    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+}
+
+void BookingHandler::handleModifyRequest(ClientSocket* sender, const QJsonObject& request)
+{
+    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+}
+
+void BookingHandler::handleModifyReply(ClientSocket* sender, const QJsonObject& request)
+{
+    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+}
+
 void BookingHandler::sendSuccessResponse(
     ClientSocket* sender, const QJsonObject& request, const QString& message)
 {
@@ -212,7 +208,6 @@ void BookingHandler::sendSuccessResponse(
     sender->sendJson(response);
 }
 
-// 发送错误响应
 void BookingHandler::sendErrorResponse(
     ClientSocket* sender, const QJsonObject& request, StatusCode code, const QString& message)
 {

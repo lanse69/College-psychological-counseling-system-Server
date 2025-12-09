@@ -12,6 +12,7 @@ qt_standard_project_setup(REQUIRES 6.9)
 qt_add_executable(appPsyServer
 	src/main.cpp
         src/core/ProtocolDefs.h
+        src/core/AsyncExecutor.h
         src/core/ConfigManager.h src/core/ConfigManager.cpp
         src/core/ServerApp.h src/core/ServerApp.cpp
         src/dao/AppointmentDao.h src/dao/AppointmentDao.cpp

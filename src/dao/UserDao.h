@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QJsonArray>
+#include <QSqlDatabase>
 
 struct UserInfo
 {
@@ -44,7 +45,7 @@ public:
      * @param passwordHash 密码哈希值
      * @return UserInfo 用户信息，失败时id为-1
      */
-    static UserInfo validateUser(const QString& username, const QString& passwordHash);
+    static UserInfo validateUser(QSqlDatabase db, const QString& username, const QString& passwordHash);
 
     /**
      * @brief 添加基础用户
@@ -54,9 +55,8 @@ public:
      * @param realName 真实姓名
      * @return int 新用户的ID，失败返回-1
      */
-    static int addUser(const QString& username,
-                       const QString& passwordHash,
-                       int role,
+    static int addUser(QSqlDatabase db, const QString& username,
+                       const QString& passwordHash, int role,
                        const QString& realName);
 
     /**
@@ -66,28 +66,28 @@ public:
      * @param specializedField 专长领域
      * @return bool 操作是否成功
      */
-    static bool addDoctorInfo(int userId, const QString& intro, const QString& specializedField);
+    static bool addDoctorInfo(QSqlDatabase db, int userId, const QString& intro, const QString& specializedField);
 
     /**
      * @brief 删除用户
      * @param userId 用户ID
      * @return bool 操作是否成功
      */
-    static bool deleteUser(int userId);
+    static bool deleteUser(QSqlDatabase db, int userId);
 
     /**
      * @brief 检查用户名是否存在
      * @param username 用户名
      * @return bool 用户名是否存在
      */
-    static bool isUsernameExist(const QString& username);
+    static bool isUsernameExist(QSqlDatabase db, const QString& username);
 
     /**
      * @brief 获取用户角色
      * @param userId 用户ID
      * @return int 用户角色，-1表示用户不存在
      */
-    static int getUserRole(int userId);
+    static int getUserRole(QSqlDatabase db, int userId);
 
     /**
      * @brief 更新基础信息
@@ -96,7 +96,7 @@ public:
      * @param passwordHash 密码哈希值，为空时不修改密码
      * @return bool 操作是否成功
      */
-    static bool updateBasicInfo(int userId,
+    static bool updateBasicInfo(QSqlDatabase db, int userId,
                                 const QString& realName,
                                 const QString& passwordHash = "");
 
@@ -107,34 +107,32 @@ public:
      * @param spec 专长领域
      * @return bool 操作是否成功
      */
-    static bool updateDoctorInfo(int userId, const QString& intro, const QString& spec);
+    static bool updateDoctorInfo(QSqlDatabase db, int userId, const QString& intro, const QString& spec);
 
     /**
      * @brief 查询所有用户
      * @param excludeId 要排除的用户ID，默认为-1（不排除）
      * @return QJsonArray 用户列表JSON数组
      */
-    static QJsonArray getAllUsers(int excludeId = -1);
-
-    // ========== 新增的医生相关方法 ==========
+    static QJsonArray getAllUsers(QSqlDatabase db, int excludeId = -1);
 
     /**
      * @brief 获取医生列表（包含医生详细信息）
      * @return QJsonArray 医生列表数组
      */
-    static QJsonArray getDoctorList();
+    static QJsonArray getDoctorList(QSqlDatabase db);
 
     /**
      * @brief 获取单个医生详细信息
      * @param doctorId 医生ID
      * @return QJsonObject 医生详细信息对象
      */
-    static QJsonObject getDoctorDetail(int doctorId);
+    static QJsonObject getDoctorDetail(QSqlDatabase db, int doctorId);
 
     /**
      * @brief 检查医生是否存在
      * @param doctorId 医生ID
      * @return bool 医生是否存在
      */
-    static bool isDoctorExist(int doctorId);
+    static bool isDoctorExist(QSqlDatabase db, int doctorId);
 };

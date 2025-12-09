@@ -16,7 +16,7 @@ public:
     bool connectToDatabase();
     bool initTables();
 
-    // 获取主线程的连接 (用于普通的快速操作，如登录、简单查询)
+    // 获取主线程的连接
     QSqlDatabase getMainDatabase() const;
 
     /**

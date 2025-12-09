@@ -11,8 +11,7 @@
 
 AppointmentDao::AppointmentDao(QObject *parent) : QObject(parent) {}
 
-bool AppointmentDao::createAppointment(int studentId, int doctorId, const QString &date, int timeSlot, QString &errorMsg) {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
+bool AppointmentDao::createAppointment(QSqlDatabase db, int studentId, int doctorId, const QString &date, int timeSlot, QString &errorMsg) {
     if (!db.isValid() || !db.isOpen()) {
         errorMsg = "数据库未连接";
         return false;
@@ -26,19 +25,7 @@ bool AppointmentDao::createAppointment(int studentId, int doctorId, const QStrin
 
     QSqlQuery query(db);
 
-    // 悲观锁 (Pessimistic Locking)
-    // 锁定该医生的 users 表记录，防止并发修改
-    QString lockSql = "SELECT id FROM users WHERE id = ? FOR UPDATE";
-    query.prepare(lockSql);
-    query.addBindValue(doctorId);
-    
-    if (!query.exec()) {
-        db.rollback();
-        errorMsg = "获取医生数据锁失败: " + query.lastError().text();
-        return false;
-    }
-
-    // 检查时间段是否已被预约
+    // 检查预约表冲突 (appointments)
     // status != 3 表示未取消的预约都算占用
     QString checkSql = "SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND time_slot = ? AND status != 3";
     query.prepare(checkSql);
@@ -54,11 +41,36 @@ bool AppointmentDao::createAppointment(int studentId, int doctorId, const QStrin
 
     if (query.next()) {
         db.rollback();
-        errorMsg = "该时间段已被预约，请选择其他时间";
+        errorMsg = "手慢了，该时间段刚被抢走";
         return false;
     }
 
-    // 执行插入
+    // 检查排班表冲突 (schedules) 并 确保排班记录存在
+    QString initScheduleSql = "INSERT INTO schedules (doctor_id, date, time_slot_flags) VALUES (?, ?, 0) ON CONFLICT (doctor_id, date) DO NOTHING";
+    query.prepare(initScheduleSql);
+    query.addBindValue(doctorId);
+    query.addBindValue(date);
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "初始化排班失败: " + query.lastError().text();
+        return false;
+    }
+
+    // 检查掩码位是否被占用
+    QString checkMaskSql = "SELECT time_slot_flags FROM schedules WHERE doctor_id = ? AND date = ?";
+    query.prepare(checkMaskSql);
+    query.addBindValue(doctorId);
+    query.addBindValue(date);
+    if (query.exec() && query.next()) {
+        int flags = query.value(0).toInt();
+        if ((flags >> timeSlot) & 1) {
+            db.rollback();
+            errorMsg = "医生该时段已设置为忙碌/休息";
+            return false;
+        }
+    }
+
+    // 执行插入预约 (Status 直接设为 1: 已确认)
     QString insertSql = "INSERT INTO appointments (student_id, doctor_id, date, time_slot, status, create_time) "
                         "VALUES (?, ?, ?, ?, ?, ?)";
     query.prepare(insertSql);
@@ -66,12 +78,26 @@ bool AppointmentDao::createAppointment(int studentId, int doctorId, const QStrin
     query.addBindValue(doctorId);
     query.addBindValue(date);
     query.addBindValue(timeSlot);
-    query.addBindValue(0);
+    query.addBindValue(1);
     query.addBindValue(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"));
 
     if (!query.exec()) {
         db.rollback();
         errorMsg = "创建预约失败: " + query.lastError().text();
+        return false;
+    }
+
+    // 更新排班表掩码 (标记该位置为忙碌)
+    // 使用位运算 OR: time_slot_flags | (1 << timeSlot)
+    QString updateMaskSql = "UPDATE schedules SET time_slot_flags = time_slot_flags | (1 << ?) WHERE doctor_id = ? AND date = ?";
+    query.prepare(updateMaskSql);
+    query.addBindValue(timeSlot);
+    query.addBindValue(doctorId);
+    query.addBindValue(date);
+
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "更新排班状态失败: " + query.lastError().text();
         return false;
     }
 
@@ -85,10 +111,9 @@ bool AppointmentDao::createAppointment(int studentId, int doctorId, const QStrin
     return true;
 }
 
-QJsonArray AppointmentDao::getStudentAppointments(int studentId, QString &errorMsg)
+QJsonArray AppointmentDao::getStudentAppointments(QSqlDatabase db, int studentId, QString &errorMsg)
 {
     QJsonArray result;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
 
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
@@ -141,10 +166,9 @@ QJsonArray AppointmentDao::getStudentAppointments(int studentId, QString &errorM
     return result;
 }
 
-QJsonArray AppointmentDao::getDoctorAppointments(int doctorId, QString &errorMsg)
+QJsonArray AppointmentDao::getDoctorAppointments(QSqlDatabase db, int doctorId, QString &errorMsg)
 {
     QJsonArray result;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
 
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
@@ -194,32 +218,76 @@ QJsonArray AppointmentDao::getDoctorAppointments(int doctorId, QString &errorMsg
     return result;
 }
 
-bool AppointmentDao::cancelAppointment(
-    int appointmentId, QString &errorMsg)
+
+bool AppointmentDao::cancelAppointment(QSqlDatabase db, int appointmentId, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
-    if (!db.isValid()) {
-        errorMsg = "数据库连接无效";
+    if (!db.isValid() || !db.isOpen()) {
+        errorMsg = "数据库未连接";
+        return false;
+    }
+
+    if (!db.transaction()) {
+        errorMsg = "事务启动失败";
         return false;
     }
 
     QSqlQuery query(db);
-    QString sql = "UPDATE appointments SET status = 3 WHERE id = ?";
-    query.prepare(sql);
+
+    // 先查询该预约的信息 (doctor_id, date, time_slot)，释放排班
+    QString querySql = "SELECT doctor_id, date, time_slot FROM appointments WHERE id = ?";
+    query.prepare(querySql);
+    query.addBindValue(appointmentId);
+    
+    int doctorId = 0;
+    QString dateStr;
+    int timeSlot = 0;
+
+    if (query.exec() && query.next()) {
+        doctorId = query.value("doctor_id").toInt();
+        dateStr = query.value("date").toString();
+        timeSlot = query.value("time_slot").toInt();
+    } else {
+        db.rollback();
+        errorMsg = "预约不存在";
+        return false;
+    }
+
+    // 更新预约状态为 3 (已取消)
+    QString updateSql = "UPDATE appointments SET status = 3 WHERE id = ?";
+    query.prepare(updateSql);
     query.addBindValue(appointmentId);
 
     if (!query.exec()) {
+        db.rollback();
         errorMsg = "取消预约失败: " + query.lastError().text();
+        return false;
+    }
+
+    // 释放排班表 (Schedules) 的掩码
+    // 使用位运算 AND NOT: time_slot_flags & ~(1 << timeSlot)
+    QString releaseSql = "UPDATE schedules SET time_slot_flags = time_slot_flags & ~(1 << ?) WHERE doctor_id = ? AND date = ?";
+    query.prepare(releaseSql);
+    query.addBindValue(timeSlot);
+    query.addBindValue(doctorId);
+    query.addBindValue(dateStr);
+
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "释放排班失败: " + query.lastError().text();
+        return false;
+    }
+
+    if (!db.commit()) {
+        db.rollback();
+        errorMsg = "事务提交失败";
         return false;
     }
 
     return true;
 }
 
-bool AppointmentDao::updateAppointmentStatus(
-    int appointmentId, int status, QString &errorMsg)
+bool AppointmentDao::updateAppointmentStatus(QSqlDatabase db, int appointmentId, int status, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
         return false;
@@ -239,10 +307,8 @@ bool AppointmentDao::updateAppointmentStatus(
     return true;
 }
 
-bool AppointmentDao::isTimeSlotAvailable(
-    int doctorId, const QString &date, int timeSlot, QString &errorMsg)
+bool AppointmentDao::isTimeSlotAvailable(QSqlDatabase db, int doctorId, const QString &date, int timeSlot, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
         return false;
@@ -264,10 +330,9 @@ bool AppointmentDao::isTimeSlotAvailable(
     return !query.next(); // 如果没有记录，则时间段可用
 }
 
-QJsonArray AppointmentDao::getUserInfo(int userId, QString &errorMsg)
+QJsonArray AppointmentDao::getUserInfo(QSqlDatabase db, int userId, QString &errorMsg)
 {
     QJsonArray result;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
 
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
@@ -310,9 +375,8 @@ QJsonArray AppointmentDao::getUserInfo(int userId, QString &errorMsg)
     return result;
 }
 
-bool AppointmentDao::confirmAppointment(int appointmentId, int doctorId, QString &errorMsg)
+bool AppointmentDao::confirmAppointment(QSqlDatabase db, int appointmentId, int doctorId, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
         return false;
@@ -344,12 +408,11 @@ bool AppointmentDao::confirmAppointment(int appointmentId, int doctorId, QString
     checkQuery.finish();
 
     // 更新预约状态为已确认（状态1）
-    return updateAppointmentStatus(appointmentId, 1, errorMsg);
+    return updateAppointmentStatus(db, appointmentId, 1, errorMsg);
 }
 
-bool AppointmentDao::rejectAppointment(int appointmentId, int doctorId, QString &errorMsg)
+bool AppointmentDao::rejectAppointment(QSqlDatabase db, int appointmentId, int doctorId, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
         return false;
@@ -381,12 +444,11 @@ bool AppointmentDao::rejectAppointment(int appointmentId, int doctorId, QString 
     checkQuery.finish();
 
     // 更新预约状态为已取消（状态3）
-    return updateAppointmentStatus(appointmentId, 3, errorMsg);
+    return updateAppointmentStatus(db, appointmentId, 3, errorMsg);
 }
 
-bool AppointmentDao::completeConsultation(int appointmentId, int doctorId, QString &errorMsg)
+bool AppointmentDao::completeConsultation(QSqlDatabase db, int appointmentId, int doctorId, QString &errorMsg)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isValid()) {
         errorMsg = "数据库连接无效";
         return false;
@@ -419,14 +481,12 @@ bool AppointmentDao::completeConsultation(int appointmentId, int doctorId, QStri
     checkQuery.finish();
 
     // 更新预约状态为已完成（状态2）
-    qDebug() << "将预约" << appointmentId << "状态从" << currentStatus << "更新为已完成(2)";
-    return updateAppointmentStatus(appointmentId, 2, errorMsg);
+    return updateAppointmentStatus(db, appointmentId, 2, errorMsg);
 }
 
-QJsonArray AppointmentDao::getDoctorPatients(int doctorId, QString &errorMsg)
+QJsonArray AppointmentDao::getDoctorPatients(QSqlDatabase db, int doctorId, QString &errorMsg)
 {
     QJsonArray result;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
 
     if (!db.isOpen()) {
         const_cast<DBManager&>(DBManager::instance()).getMainDatabase().open();
@@ -485,10 +545,9 @@ QJsonArray AppointmentDao::getDoctorPatients(int doctorId, QString &errorMsg)
     return result;
 }
 
-QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(int doctorId, int studentId, QString &errorMsg)
+QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(QSqlDatabase db, int doctorId, int studentId, QString &errorMsg)
 {
     QJsonArray result;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
 
     // 确保连接有效
     if (!db.isOpen()) {
@@ -507,10 +566,12 @@ QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(int doctorId, int studen
         SELECT 
             a.id, a.date, a.time_slot, a.status, a.create_time, 
             u.real_name as student_name,
-            c.report_content, c.result_tags
+            c.report_content, c.result_tags,
+            sa.answers_json
         FROM appointments a
         JOIN users u ON a.student_id = u.id
         LEFT JOIN consultation_records c ON a.id = c.appt_id
+        LEFT JOIN survey_answers sa ON a.id = sa.appt_id
         WHERE a.doctor_id = :did AND a.student_id = :sid
         ORDER BY a.date DESC, a.time_slot DESC
     )";

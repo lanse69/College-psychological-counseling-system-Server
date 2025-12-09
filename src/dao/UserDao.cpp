@@ -31,10 +31,10 @@ static QString hashPassword(const QString& clientHash, const QString& salt) {
     return QString(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
 }
 
-UserInfo UserDao::validateUser(const QString& username, const QString& passwordHash)
+UserInfo UserDao::validateUser(QSqlDatabase db, const QString& username, const QString& passwordHash)
 {
     UserInfo user;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
+
     if (!db.isOpen()) {
         qWarning() << "数据库未连接，无法验证用户";
         return user;
@@ -71,9 +71,9 @@ UserInfo UserDao::validateUser(const QString& username, const QString& passwordH
     return user;
 }
 
-bool UserDao::isUsernameExist(const QString& username)
+bool UserDao::isUsernameExist(QSqlDatabase db, const QString& username)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare("SELECT count(*) FROM users WHERE username = :u");
     query.bindValue(":u", username);
     if (query.exec() && query.next()) {
@@ -83,9 +83,8 @@ bool UserDao::isUsernameExist(const QString& username)
     return false;
 }
 
-int UserDao::addUser(const QString& username, const QString& passwordHash, int role, const QString& realName)
+int UserDao::addUser(QSqlDatabase db, const QString& username, const QString& passwordHash, int role, const QString& realName)
 {
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     QSqlQuery query(db);
 
     QString salt = generateSalt();
@@ -112,9 +111,9 @@ int UserDao::addUser(const QString& username, const QString& passwordHash, int r
     return -1;
 }
 
-bool UserDao::addDoctorInfo(int userId, const QString& intro, const QString& specializedField)
+bool UserDao::addDoctorInfo(QSqlDatabase db, int userId, const QString& intro, const QString& specializedField)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare(
         "INSERT INTO doctor_info (user_id, intro, specialized_field) VALUES (:id, :intro, :spec)");
     query.bindValue(":id", userId);
@@ -128,9 +127,9 @@ bool UserDao::addDoctorInfo(int userId, const QString& intro, const QString& spe
     return true;
 }
 
-bool UserDao::deleteUser(int userId)
+bool UserDao::deleteUser(QSqlDatabase db, int userId)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare("DELETE FROM users WHERE id = :id");
     query.bindValue(":id", userId);
 
@@ -142,9 +141,9 @@ bool UserDao::deleteUser(int userId)
     return true;
 }
 
-int UserDao::getUserRole(int userId)
+int UserDao::getUserRole(QSqlDatabase db, int userId)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare("SELECT role FROM users WHERE id = :id");
     query.bindValue(":id", userId);
 
@@ -155,9 +154,9 @@ int UserDao::getUserRole(int userId)
     return -1; // Not found
 }
 
-bool UserDao::updateBasicInfo(int userId, const QString& realName, const QString& passwordHash)
+bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realName, const QString& passwordHash)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
 
     QString sql = "UPDATE users SET real_name = :n";
     
@@ -189,9 +188,9 @@ bool UserDao::updateBasicInfo(int userId, const QString& realName, const QString
     return true;
 }
 
-bool UserDao::updateDoctorInfo(int userId, const QString& intro, const QString& spec)
+bool UserDao::updateDoctorInfo(QSqlDatabase db, int userId, const QString& intro, const QString& spec)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare(
         "UPDATE doctor_info SET intro = :intro, specialized_field = :spec WHERE user_id = :id");
     query.bindValue(":intro", intro);
@@ -206,13 +205,12 @@ bool UserDao::updateDoctorInfo(int userId, const QString& intro, const QString& 
     return true;
 }
 
-QJsonArray UserDao::getAllUsers(int excludeId)
+QJsonArray UserDao::getAllUsers(QSqlDatabase db, int excludeId)
 {
     QJsonArray list;
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
 
-    query.prepare(
-        "SELECT id, username, real_name, role FROM users WHERE id != :eid ORDER BY id ASC");
+    query.prepare("SELECT id, username, real_name, role FROM users WHERE id != :eid ORDER BY id ASC");
     query.bindValue(":eid", excludeId);
 
     if (query.exec()) {
@@ -230,10 +228,9 @@ QJsonArray UserDao::getAllUsers(int excludeId)
     return list;
 }
 
-QJsonArray UserDao::getDoctorList()
+QJsonArray UserDao::getDoctorList(QSqlDatabase db)
 {
     QJsonArray list;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     
     // 确保连接有效
     if (!db.isOpen()) {
@@ -271,10 +268,9 @@ QJsonArray UserDao::getDoctorList()
     return list;
 }
 
-QJsonObject UserDao::getDoctorDetail(int doctorId)
+QJsonObject UserDao::getDoctorDetail(QSqlDatabase db, int doctorId)
 {
     QJsonObject obj;
-    QSqlDatabase db = DBManager::instance().getMainDatabase();
     if (!db.isOpen()) {
         qWarning() << "数据库未连接，无法获取医生详情";
         return obj;
@@ -296,10 +292,9 @@ QJsonObject UserDao::getDoctorDetail(int doctorId)
     return obj;
 }
 
-bool UserDao::isDoctorExist(
-    int doctorId)
+bool UserDao::isDoctorExist(QSqlDatabase db, int doctorId)
 {
-    QSqlQuery query(DBManager::instance().getMainDatabase());
+    QSqlQuery query(db);
     query.prepare("SELECT COUNT(*) FROM users WHERE id = :id AND role = 2");
     query.bindValue(":id", doctorId);
 
