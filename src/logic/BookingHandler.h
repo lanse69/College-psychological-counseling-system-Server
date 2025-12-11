@@ -29,6 +29,9 @@ public:
     // 学生回复修改请求 (同意/拒绝)
     static void handleModifyReply(ClientSocket* sender, const QJsonObject& request);
 
+    // 处理删除预约
+    static void handleDeleteBooking(ClientSocket* sender, const QJsonObject& request);
+
 private:
     BookingHandler() = default;
 

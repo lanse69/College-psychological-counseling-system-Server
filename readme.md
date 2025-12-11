@@ -56,10 +56,9 @@ CREATE USER "PsyServer" WITH PASSWORD 'PsyDB@Of@PostgreSQL';
 -- 赋予这个用户建库权限
 ALTER USER "PsyServer" CREATEDB;
 
--- 创建数据库并指定所有者
+-- 创建数据库并指定所有者（可选）
 CREATE DATABASE "PsyDB" OWNER "PsyServer";
-
--- 赋予权限
+-- 赋予权限（可选）
 GRANT ALL PRIVILEGES ON DATABASE "PsyDB" TO "PsyServer";
 
 -- 退出

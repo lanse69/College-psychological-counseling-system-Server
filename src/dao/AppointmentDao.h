@@ -57,4 +57,10 @@ public:
      * @return QJsonArray 预约学生列表
      */
     QJsonArray getDoctorPatients(QSqlDatabase db, int doctorId, QString &errorMsg);
+
+    // 保存咨询报告
+    bool saveReport(QSqlDatabase db, int appointmentId, int doctorId, const QString &content, const QString &tags, QString &errorMsg);
+
+    // 删除已取消的预约
+    bool deleteCancelledAppointment(QSqlDatabase db, int appointmentId, int operatorId, QString &errorMsg);
 };

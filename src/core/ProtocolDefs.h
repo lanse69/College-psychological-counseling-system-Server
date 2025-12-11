@@ -50,6 +50,8 @@ enum class CmdType {
 
     // 预约核心 (Booking)
     CREATE_BOOKING, // 学生发起预约
+    STUDENT_DELETE_BOOKING = 1105,
+    DOCTOR_DELETE_BOOKING = 1206,
     CANCEL_BOOKING, // 取消预约 (学生/医生/管理员通用)
 
     // 预约修改
@@ -60,6 +62,8 @@ enum class CmdType {
     GET_MY_BOOKINGS, // 获取我的预约记录
 
     // 问卷 & 报告 (Survey & Report)
+    DOCTOR_GET_MY_SURVEY = 2101, // 医生获取自己的问卷模版
+    DOCTOR_SAVE_SURVEY = 2102,   // 医生保存/更新问卷模版
     GET_SURVEY_LIST,    // 获取可用问卷列表
     GET_SURVEY_CONTENT, // 获取具体问卷题目
     SUBMIT_SURVEY,      // 学生提交问卷答案

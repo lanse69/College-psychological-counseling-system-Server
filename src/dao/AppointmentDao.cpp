@@ -8,6 +8,7 @@
 #include <QDateTime>
 
 #include "DBManager.h"
+#include "core/ProtocolDefs.h"
 
 AppointmentDao::AppointmentDao(QObject *parent) : QObject(parent) {}
 
@@ -25,23 +26,46 @@ bool AppointmentDao::createAppointment(QSqlDatabase db, int studentId, int docto
 
     QSqlQuery query(db);
 
+    // 检查学生的时间冲突
+    // 查询该学生在同一日期、同一时段，是否有状态不为 3 (已取消) 的预约
+    QString checkStudentSql = "SELECT id FROM appointments WHERE student_id = ? AND date = ? AND time_slot = ? AND status != 3";
+    query.prepare(checkStudentSql);
+    query.addBindValue(studentId);
+    query.addBindValue(date);
+    query.addBindValue(timeSlot);
+
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "查询学生时间冲突失败: " + query.lastError().text();
+        return false;
+    }
+
+    if (query.next()) {
+        db.rollback();
+        // 提示信息尽量具体，告知用户冲突的时间段
+        errorMsg = QString("您在 %1 的 %2 时段已经有其他预约，无法重复预约。")
+                       .arg(date)
+                       .arg(GetTimeSlotText(timeSlot)); 
+        return false;
+    }
+
     // 检查预约表冲突 (appointments)
     // status != 3 表示未取消的预约都算占用
-    QString checkSql = "SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND time_slot = ? AND status != 3";
-    query.prepare(checkSql);
+    QString checkDoctorSql = "SELECT id FROM appointments WHERE doctor_id = ? AND date = ? AND time_slot = ? AND status != 3";
+    query.prepare(checkDoctorSql);
     query.addBindValue(doctorId);
     query.addBindValue(date);
     query.addBindValue(timeSlot);
 
     if (!query.exec()) {
         db.rollback();
-        errorMsg = "检查预约冲突失败: " + query.lastError().text();
+        errorMsg = "检查医生预约冲突失败: " + query.lastError().text();
         return false;
     }
 
     if (query.next()) {
         db.rollback();
-        errorMsg = "手慢了，该时间段刚被抢走";
+        errorMsg = "手慢了，该医生的此时间段刚被抢走";
         return false;
     }
 
@@ -70,7 +94,7 @@ bool AppointmentDao::createAppointment(QSqlDatabase db, int studentId, int docto
         }
     }
 
-    // 执行插入预约 (Status 直接设为 1: 已确认)
+    // 执行插入预约 (Status设为 1: 已确认)
     QString insertSql = "INSERT INTO appointments (student_id, doctor_id, date, time_slot, status, create_time) "
                         "VALUES (?, ?, ?, ?, ?, ?)";
     query.prepare(insertSql);
@@ -128,11 +152,21 @@ QJsonArray AppointmentDao::getStudentAppointments(QSqlDatabase db, int studentId
     }
 
     QSqlQuery query(db);
-    QString sql
-        = "SELECT a.id, a.student_id, a.doctor_id, a.date, a.time_slot, a.status, a.create_time, "
-          "a.modify_request_json, u.real_name as doctor_name, d.specialized_field FROM "
-          "appointments a JOIN users u ON a.doctor_id = u.id JOIN doctor_info d ON u.id = "
-          "d.user_id WHERE a.student_id = ? ORDER BY a.date DESC, a.time_slot DESC";
+    QString sql = R"(
+        SELECT 
+            a.id, a.student_id, a.doctor_id, a.date, a.time_slot, a.status, a.create_time, 
+            a.modify_request_json, 
+            u.real_name as doctor_name, 
+            d.specialized_field,
+            c.report_content, 
+            c.result_tags
+        FROM appointments a 
+        JOIN users u ON a.doctor_id = u.id 
+        JOIN doctor_info d ON u.id = d.user_id 
+        LEFT JOIN consultation_records c ON a.id = c.appt_id
+        WHERE a.student_id = ? 
+        ORDER BY a.date DESC, a.time_slot DESC
+    )";
 
     if (!query.prepare(sql)) {
         errorMsg = "SQL准备失败: " + query.lastError().text();
@@ -157,6 +191,8 @@ QJsonArray AppointmentDao::getStudentAppointments(QSqlDatabase db, int studentId
         appointment["doctorName"] = query.value("doctor_name").toString();
         appointment["specializedField"] = query.value("specialized_field").toString();
         appointment["createdAt"] = query.value("create_time").toString();
+        appointment["report"] = query.value("report_content").toString();
+        appointment["resultTags"] = query.value("result_tags").toString();
 
         result.append(appointment);
     }
@@ -560,8 +596,6 @@ QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(QSqlDatabase db, int doc
     }
 
     QSqlQuery query(db);
-    // 关联查询：Appointments (主) -> Users (学生名) -> ConsultationRecords (报告/标签)
-    // 使用 LEFT JOIN，因为只有已完成的预约才会有记录
     QString sql = R"(
         SELECT 
             a.id, a.date, a.time_slot, a.status, a.create_time, 
@@ -594,6 +628,14 @@ QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(QSqlDatabase db, int doc
 
         QString tags = query.value("result_tags").toString();
         QString report = query.value("report_content").toString();
+
+        QByteArray ansBytes = query.value("answers_json").toByteArray();
+        if (!ansBytes.isEmpty()) {
+            item["surveyAnswers"] = QJsonDocument::fromJson(ansBytes).array();
+        } else {
+            item["surveyAnswers"] = QJsonArray(); // 空数组
+        }
+
         QString summary;
 
         if (!tags.isEmpty()) {
@@ -601,17 +643,13 @@ QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(QSqlDatabase db, int doc
             summary = tags;
         } else if (!report.isEmpty()) {
             // 没标签，截取报告内容的前 20 个字
-            summary = report.left(20);
-            if (report.length() > 20) {
-                summary += "...";
-            }
+            summary = report.left(20) + (report.length()>20?"...":"");
         } else {
             // 没有咨询记录
             summary = "常规咨询";
         }
         
         item["reason"] = summary;
-        
         item["report"] = report;
         item["resultTags"] = tags;
         
@@ -619,4 +657,87 @@ QJsonArray AppointmentDao::getHistoryByDoctorAndStudent(QSqlDatabase db, int doc
     }
     
     return result;
+}
+
+bool AppointmentDao::saveReport(QSqlDatabase db, int appointmentId, int doctorId, 
+                                const QString &content, const QString &tags, QString &errorMsg)
+{
+    if (!db.isValid() || !db.isOpen()) {
+        errorMsg = "数据库连接无效";
+        return false;
+    }
+
+    QSqlQuery query(db);
+
+    // 校验该预约是否属于该医生
+    query.prepare("SELECT id FROM appointments WHERE id = ? AND doctor_id = ?");
+    query.addBindValue(appointmentId);
+    query.addBindValue(doctorId);
+    if (!query.exec() || !query.next()) {
+        errorMsg = "预约不存在或无权操作";
+        return false;
+    }
+    // 删除已有报告（如果存在）
+    QSqlQuery delQuery(db);
+    delQuery.prepare("DELETE FROM consultation_records WHERE appt_id = ?");
+    delQuery.addBindValue(appointmentId);
+    delQuery.exec();
+
+    // 插入新报告
+    QSqlQuery insertQuery(db);
+    insertQuery.prepare(R"(
+        INSERT INTO consultation_records (appt_id, doctor_id, report_content, result_tags, create_time)
+        VALUES (?, ?, ?, ?, ?)
+    )");
+    insertQuery.addBindValue(appointmentId);
+    insertQuery.addBindValue(doctorId);
+    insertQuery.addBindValue(content);
+    insertQuery.addBindValue(tags);
+    insertQuery.addBindValue(QDateTime::currentDateTime());
+
+    if (!insertQuery.exec()) {
+        errorMsg = "保存报告失败: " + insertQuery.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+bool AppointmentDao::deleteCancelledAppointment(QSqlDatabase db, int appointmentId, int operatorId, QString &errorMsg)
+{
+    if (!db.isOpen()) {
+        errorMsg = "数据库未连接";
+        return false;
+    }
+
+    QSqlQuery query(db);
+
+    // 安全校验：
+    //    - 预约ID匹配
+    //    - 状态必须是 3 (已取消)
+    //    - 操作者必须是该预约的学生 OR 医生
+    QString sql = R"(
+        DELETE FROM appointments 
+        WHERE id = :id 
+          AND status = 3 
+          AND (student_id = :uid OR doctor_id = :uid)
+    )";
+
+    query.prepare(sql);
+    query.bindValue(":id", appointmentId);
+    query.bindValue(":uid", operatorId);
+
+    if (!query.exec()) {
+        errorMsg = "删除失败: " + query.lastError().text();
+        return false;
+    }
+
+    // numRowsAffected() 返回受影响行数
+    // 如果为 0，说明条件不满足（比如不是已取消状态，或者不是该用户的预约）
+    if (query.numRowsAffected() == 0) {
+        errorMsg = "删除失败：记录不存在、状态未取消或无权操作";
+        return false;
+    }
+
+    return true;
 }

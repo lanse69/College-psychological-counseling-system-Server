@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QJsonObject>
+
 #include "network/ClientSocket.h"
 
 /**
@@ -87,6 +88,9 @@ public:
      */
     static void handleUpdateSchedule(ClientSocket* sender, const QJsonObject& request);
 
+
+    static void handleDeleteBooking(ClientSocket* sender, const QJsonObject& request);
+
 private:
     /**
      * @brief 发送成功响应
@@ -95,10 +99,7 @@ private:
      * @param data 响应数据
      * @param msg 响应消息
      */
-    static void sendSuccessResponse(ClientSocket* sender,
-                                    int cmd,
-                                    const QJsonValue& data,
-                                    const QString& msg = "操作成功");
+    static void sendSuccessResponse(ClientSocket* sender, int cmd, const QJsonValue& data, const QString& msg = "操作成功");
 
     /**
      * @brief 发送错误响应

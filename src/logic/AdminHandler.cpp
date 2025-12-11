@@ -136,7 +136,10 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
 
     AsyncExecutor::run(sender,
         [=](QSqlDatabase db) -> UpdateResult {
-            if (!isUserAdmin(db, operatorId)) return {StatusCode::FORBIDDEN, "无权操作", false};
+            bool isAdmin = isUserAdmin(db, operatorId);
+            if (!isAdmin && operatorId != targetId) {
+                return {StatusCode::FORBIDDEN, "无权操作", false};
+            }
 
             bool success = UserDao::updateBasicInfo(db, targetId, realName, passHash);
             

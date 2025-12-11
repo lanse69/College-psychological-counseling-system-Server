@@ -15,9 +15,7 @@ public:
      */
     static void handleLogin(ClientSocket* sender, const QJsonObject& request);
 
-    /**
-     * @brief 获取当前登录用户的详细信息
-     */
+    // 获取个人详细信息
     static void handleGetUserInfo(ClientSocket* sender, const QJsonObject& request);
 
 private:

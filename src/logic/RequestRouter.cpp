@@ -9,6 +9,7 @@
 #include "SurveyHandler.h"
 #include "core/ProtocolDefs.h"
 #include "network/ClientSocket.h"
+#include "SurveyHandler.h"
 
 RequestRouter& RequestRouter::instance()
 {
@@ -91,9 +92,6 @@ void RequestRouter::dispatch(
         case CmdType::ADMIN_DEL_USER:
             AdminHandler::handleDeleteUser(sender, request);
             break;
-        case CmdType::UPDATE_USER_INFO:
-            AdminHandler::handleUpdateUserInfo(sender, request);
-            break;
         case CmdType::GET_STATISTICS:
             AdminHandler::handleGetStatistics(sender, request);
             break;
@@ -115,10 +113,7 @@ void RequestRouter::dispatch(
         case CmdType::STUDENT_GET_DOCTOR_LIST:
             DoctorHandler::handleStudentGetDoctorList(sender, request);
             break;
-        case CmdType::STUDENT_SUBMIT_SURVEY:
-            // SurveyHandler::handleStudentSubmitSurvey(sender, request);
-            break;
-
+            
         // 医生/管理员获取排班表
         case CmdType::GET_DOCTOR_SCHEDULE:
             DoctorHandler::handleGetSchedule(sender, request);
@@ -132,6 +127,34 @@ void RequestRouter::dispatch(
         case CmdType::GET_USER_INFO:
              AuthHandler::handleGetUserInfo(sender, request);
              break;
+            
+        case CmdType::UPDATE_USER_INFO:
+            AdminHandler::handleUpdateUserInfo(sender, request);
+            break;
+
+        case CmdType::DOCTOR_DELETE_BOOKING:
+            DoctorHandler::handleDeleteBooking(sender, request);
+            break;
+
+        case CmdType::STUDENT_DELETE_BOOKING:
+            BookingHandler::handleDeleteBooking(sender, request);
+            break;
+
+        // 学生/问卷业务
+        case CmdType::GET_SURVEY_CONTENT:
+             SurveyHandler::handleGetSurveyContent(sender, request);
+             break;
+
+        case CmdType::STUDENT_SUBMIT_SURVEY:
+             SurveyHandler::handleStudentSubmitSurvey(sender, request);
+             break;
+
+        case CmdType::DOCTOR_GET_MY_SURVEY:
+            SurveyHandler::handleDoctorGetSurvey(sender, request);
+            break;
+        case CmdType::DOCTOR_SAVE_SURVEY:
+            SurveyHandler::handleDoctorSaveSurvey(sender, request);
+            break;
 
         case CmdType::HEARTBEAT:
             break;

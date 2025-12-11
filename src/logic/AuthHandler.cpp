@@ -49,68 +49,35 @@ void AuthHandler::handleLogin(ClientSocket* sender, const QJsonObject& request) 
 }
 
 void AuthHandler::handleGetUserInfo(ClientSocket* sender, const QJsonObject& request) {
-    // 获取当前 Socket 绑定的用户 ID
     int userId = sender->userId();
-    
-    // 校验登录状态
-    if (userId <= 0) {
-        QJsonObject response;
-        response[JsonKeys::CMD] = request[JsonKeys::CMD];
-        response[JsonKeys::CODE] = (int)StatusCode::UNAUTHORIZED;
-        response[JsonKeys::MSG] = "用户未登录";
-        sender->sendJson(response);
-        return;
-    }
-
-    // 执行数据库查询
+    if (userId == -1) return; // 未登录
     AsyncExecutor::run(sender,
         [userId](QSqlDatabase db) -> QJsonObject {
-            QJsonObject userData;
-            
-            if (!db.isOpen()) return userData; // 返回空对象表示失败
-
-            QSqlQuery query(db);
-            // 使用 LEFT JOIN 关联查询，即使用户不是医生也能查出基本信息
-            QString sql = R"(
-                SELECT 
-                    u.id, u.username, u.real_name, u.role, 
-                    d.intro, d.specialized_field 
-                FROM users u 
-                LEFT JOIN doctor_info d ON u.id = d.user_id 
-                WHERE u.id = :id
-            )";
-
-            query.prepare(sql);
-            query.bindValue(":id", userId);
-
-            if (query.exec() && query.next()) {
-                userData[JsonKeys::USER_ID] = query.value("id").toInt();
-                userData[JsonKeys::USERNAME] = query.value("username").toString();
-                userData[JsonKeys::REAL_NAME] = query.value("real_name").toString();
-                userData[JsonKeys::ROLE] = query.value("role").toInt();
-                
-                // 只有医生才会有这些字段，学生查出来是空字符串，不影响前端显示
-                userData[JsonKeys::INTRO] = query.value("intro").toString();
-                userData[JsonKeys::SPEC] = query.value("specialized_field").toString();
+            int role = UserDao::getUserRole(db, userId);
+            if (role == (int)UserRole::DOCTOR) {
+                return UserDao::getDoctorDetail(db, userId); 
             } else {
-                qWarning() << "获取用户信息失败 ID:" << userId << query.lastError().text();
+                QSqlQuery q(db);
+                q.prepare("SELECT id, username, real_name, role FROM users WHERE id = ?");
+                q.addBindValue(userId);
+                if (q.exec() && q.next()) {
+                    QJsonObject obj;
+                    obj["id"] = q.value("id").toInt();
+                    obj["username"] = q.value("username").toInt(); // wait, string
+                    obj["username"] = q.value("username").toString();
+                    obj["realName"] = q.value("real_name").toString();
+                    obj["role"] = q.value("role").toInt();
+                    return obj;
+                }
+                return QJsonObject();
             }
-            return userData;
         },
-        // 主线程回调发送响应
-        [sender, request](QJsonObject userData) {
+        [sender, request](QJsonObject user) {
             QJsonObject response;
             response[JsonKeys::CMD] = request[JsonKeys::CMD];
-
-            if (!userData.isEmpty()) {
-                response[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
-                response[JsonKeys::MSG] = "获取用户信息成功";
-                response[JsonKeys::DATA] = userData;
-            } else {
-                response[JsonKeys::CODE] = (int)StatusCode::NOT_FOUND;
-                response[JsonKeys::MSG] = "用户不存在或查询失败";
-            }
-            
+            response[JsonKeys::CODE] = user.isEmpty() ? 404 : 200;
+            response[JsonKeys::MSG] = user.isEmpty() ? "获取失败" : "获取成功";
+            response[JsonKeys::DATA] = user;
             sender->sendJson(response);
         }
     );

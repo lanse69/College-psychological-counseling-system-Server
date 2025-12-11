@@ -106,6 +106,26 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
     );
 }
 
+void BookingHandler::handleDeleteBooking(ClientSocket* sender, const QJsonObject& request)
+{
+    int userId = sender->userId();
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
+
+    AsyncExecutor::run(sender,
+        [userId, apptId](QSqlDatabase db) -> QPair<bool, QString> {
+            AppointmentDao dao;
+            QString errorMsg;
+            bool success = dao.deleteCancelledAppointment(db, apptId, userId, errorMsg);
+            return {success, success ? "记录已删除" : errorMsg};
+        },
+        [sender, request](QPair<bool, QString> result) {
+            if (result.first) sendSuccessResponse(sender, request, result.second);
+            else sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, result.second);
+        }
+    );
+}
+
 void BookingHandler::handleCancelBooking(ClientSocket* sender, const QJsonObject& request)
 {
     // 基础校验

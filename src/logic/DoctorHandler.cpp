@@ -65,8 +65,16 @@ void DoctorHandler::handleGetDoctorDetail(ClientSocket* sender, const QJsonObjec
 
 void DoctorHandler::handleStudentGetDoctorList(ClientSocket* sender, const QJsonObject& request)
 {
-    // 逻辑同 handleGetDoctorList
-    handleGetDoctorList(sender, request);
+    // 获取医生列表
+    AsyncExecutor::run(sender,
+        [](QSqlDatabase db) -> QJsonArray {
+            return UserDao::getDoctorList(db);
+        },
+        // 主线程回调
+        [sender](QJsonArray doctorList) {
+            sendSuccessResponse(sender, (int)CmdType::STUDENT_GET_DOCTOR_LIST, doctorList, "获取医生列表成功");
+        }
+    );
 }
 
 void DoctorHandler::handleGetAppointments(ClientSocket* sender, const QJsonObject& request)
@@ -269,16 +277,29 @@ void DoctorHandler::handleSubmitReport(ClientSocket* sender, const QJsonObject& 
     }
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
-    // 等待后续扩展（如写入 consultation_records 表）
+    // 解析参数
+    int appointmentId = data["appointmentId"].toInt();
+    QString problem = data["problemDescription"].toString();
+    QString process = data["consultationProcess"].toString();
+    QString analysis = data["analysis"].toString();
+    QString tags = data["tags"].toString();
     
+    QString fullReport = QString("【主要问题】\n%1\n\n【咨询过程】\n%2\n\n【评估与建议】\n%3")
+                         .arg(problem).arg(process).arg(analysis);
+
+    if (appointmentId <= 0) {
+        sendErrorResponse(sender, (int)CmdType::DOCTOR_SUBMIT_REPORT, (int)StatusCode::BAD_REQUEST, "参数错误");
+        return;
+    }
+
     // 提交报告
     AsyncExecutor::run(sender,
-        [data, doctorId](QSqlDatabase db) -> OpResult {
-            // TODO: 这里调用实际的 DAO 写入报告
-            // bool success = AppointmentDao::saveReport(db, data, doctorId, errorMsg);
+        [appointmentId, doctorId, fullReport, tags](QSqlDatabase db) -> OpResult {
+            AppointmentDao dao;
+            QString errorMsg;
+            bool success = dao.saveReport(db, appointmentId, doctorId, fullReport, tags, errorMsg);
             
-            Q_UNUSED(db);
-            return {true, "报告提交成功", QJsonValue::Null};
+            return {success, success ? "报告提交成功" : errorMsg, QJsonValue::Null};
         },
         [sender](OpResult result) {
             if (result.success) {
@@ -378,4 +399,27 @@ void DoctorHandler::sendErrorResponse(ClientSocket* sender, int cmd, int code, c
     if (sender) {
         sender->sendJson(response);
     }
+}
+
+void DoctorHandler::handleDeleteBooking(ClientSocket* sender, const QJsonObject& request)
+{
+    int userId = sender->userId();
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
+
+    AsyncExecutor::run(sender,
+        [userId, apptId](QSqlDatabase db) -> QPair<bool, QString> {
+            AppointmentDao dao;
+            QString errorMsg;
+            bool success = dao.deleteCancelledAppointment(db, apptId, userId, errorMsg);
+            return {success, success ? "记录已删除" : errorMsg};
+        },
+        [sender, request](QPair<bool, QString> result) {
+            if (result.first) {
+                sendSuccessResponse(sender, request[JsonKeys::CMD].toInt(), QJsonValue::Null, result.second);
+            } else {
+                sendErrorResponse(sender, request[JsonKeys::CMD].toInt(), (int)StatusCode::BAD_REQUEST, result.second);
+            }
+        }
+    );
 }
