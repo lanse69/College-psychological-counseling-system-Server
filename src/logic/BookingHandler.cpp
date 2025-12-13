@@ -95,8 +95,9 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
                 if (docSocket) {
                     QJsonObject notify;
                     notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
-                    notify[JsonKeys::CODE] = 200;
-                    notify[JsonKeys::MSG] = "您有一个新的预约（系统自动确认）";
+                    notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                    notify[JsonKeys::MSG] = "您有一个新的预约";
+                    notify["action"] = "refresh_appointments"; 
                     docSocket->sendJson(notify);
                 }
             } else {

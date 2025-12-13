@@ -30,22 +30,3 @@ PsyServer/
 │       ├── AppointmentDao.h/cpp    # 表操作：appointments (预约记录)
 │       ├── QuestionnaireDao.h/cpp  # 表操作：questions, answers (问卷及结果)
 │       └── StatisticsDao.h/cpp     # 复杂查询：用于生成报表的聚合 SQL (Count, Group By)
-
-2. 关键文件功能详解
-
-src/core/ServerApp.cpp:
-功能: 维护一个 QMap<int, ClientSocket*> onlineUsers。
-作用: 当医生取消预约时，后台需要通知学生。通过此 Map 可以通过学生 ID 找到其对应的 Socket 连接，进而主动推送消息。
-
-src/logic/BookingHandler.cpp:
-功能: 实现复杂的预约状态机。
-学生修改预约: 接收请求 -> 调用 ScheduleDao 查医生新时间是否空闲 -> 若空闲调用 AppointmentDao 更新 -> 返回成功。
-医生修改预约: 接收请求 -> 调用 AppointmentDao 将状态改为 PENDING_STUDENT_CONFIRM -> 记录新时间 -> 调用 ServerApp 查找学生 Socket -> 推送通知。(需学生同意才可)
-
-src/logic/AdminHandler.cpp:
-功能: 响应管理员的“导出表”请求。
-实现: 不直接生成 Excel，而是调用 StatisticsDao 获取 JSON 格式的统计数据（如 [{"date": "2023-10", "count": 50}, ...]），发送给客户端，由客户端绘制图表。
-
-src/dao/StatisticsDao.cpp:
-功能: 执行复杂的 SQL 统计语句。
-示例: 统计“最常遇到的心理问题” -> SELECT tag, COUNT(*) FROM consultationRecords GROUP BY tag ORDER BY COUNT(*) DESC.

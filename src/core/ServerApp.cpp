@@ -2,6 +2,7 @@
 
 #include <QMap>
 #include <QDebug>
+#include <QTimer>
 
 #include "ProtocolDefs.h" // 引入协议定义
 
@@ -31,10 +32,11 @@ void ServerApp::registerUser(int userId, ClientSocket* socket) {
         kickMsg[JsonKeys::MSG] = "您的账号已在其他设备登录，本连接即将断开。";
         oldSocket->sendJson(kickMsg);
 
-        oldSocket->disconnectFromHost();
-
         // 旧 Socket 的 UserId 重置为 -1
         oldSocket->setUserId(-1);
+
+        // 异步延迟关闭连接
+        QTimer::singleShot(500, oldSocket, &ClientSocket::disconnectFromHost);
 
         // 强制断开旧连接
         QMetaObject::invokeMethod(oldSocket, "deleteLater", Qt::QueuedConnection);
