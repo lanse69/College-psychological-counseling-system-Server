@@ -9,6 +9,7 @@
 
 #include "DBManager.h"
 #include "core/ProtocolDefs.h"
+#include "ScheduleDao.h"
 
 AppointmentDao::AppointmentDao(QObject *parent) : QObject(parent) {}
 
@@ -194,6 +195,14 @@ QJsonArray AppointmentDao::getStudentAppointments(QSqlDatabase db, int studentId
         appointment["report"] = query.value("report_content").toString();
         appointment["resultTags"] = query.value("result_tags").toString();
 
+        // 解析修改请求详情
+        QByteArray reqBytes = query.value("modify_request_json").toByteArray();
+        if (!reqBytes.isEmpty()) {
+            QJsonObject reqObj = QJsonDocument::fromJson(reqBytes).object();
+            appointment["pendingDate"] = reqObj["date"].toString();
+            appointment["pendingSlot"] = reqObj["timeSlot"].toInt();
+        }
+
         result.append(appointment);
     }
 
@@ -247,6 +256,14 @@ QJsonArray AppointmentDao::getDoctorAppointments(QSqlDatabase db, int doctorId, 
         appointment["status"] = query.value("status").toInt();
         appointment["studentName"] = query.value("student_name").toString();
         appointment["createdAt"] = query.value("create_time").toString();
+
+        // 解析修改请求详情
+        QByteArray reqBytes = query.value("modify_request_json").toByteArray();
+        if (!reqBytes.isEmpty()) {
+            QJsonObject reqObj = QJsonDocument::fromJson(reqBytes).object();
+            appointment["pendingDate"] = reqObj["date"].toString();
+            appointment["pendingSlot"] = reqObj["timeSlot"].toInt();
+        }
 
         result.append(appointment);
     }
@@ -316,6 +333,248 @@ bool AppointmentDao::cancelAppointment(QSqlDatabase db, int appointmentId, QStri
     if (!db.commit()) {
         db.rollback();
         errorMsg = "事务提交失败";
+        return false;
+    }
+
+    return true;
+}
+
+bool AppointmentDao::modifyAppointmentDirect(QSqlDatabase db, int studentId, int appointmentId, const QString &newDate, int newSlot, QString &errorMsg)
+{
+    if (!db.isValid() || !db.isOpen()) {
+        errorMsg = "数据库未连接";
+        return false;
+    }
+
+    // 开启事务
+    if (!db.transaction()) {
+        errorMsg = "事务启动失败";
+        return false;
+    }
+
+    QSqlQuery query(db);
+
+    // 查询原预约信息 (锁定行，防止并发修改)
+    // 只有状态为 0(待确认) 或 1(已确认) 的才可以修改
+    QString oldSql = "SELECT doctor_id, date, time_slot, status FROM appointments WHERE id = ? AND student_id = ? FOR UPDATE";
+    query.prepare(oldSql);
+    query.addBindValue(appointmentId);
+    query.addBindValue(studentId);
+
+    if (!query.exec() || !query.next()) {
+        db.rollback();
+        errorMsg = "预约不存在、不属于您或已被删除";
+        return false;
+    }
+
+    int doctorId = query.value("doctor_id").toInt();
+    QString oldDate = query.value("date").toString();
+    int oldSlot = query.value("time_slot").toInt();
+    int status = query.value("status").toInt();
+
+    if (status >= 2) { // 2=完成, 3=取消
+        db.rollback();
+        errorMsg = "该预约已完成或已取消，无法修改";
+        return false;
+    }
+
+    // 如果新旧时间一致，直接返回成功
+    if (oldDate == newDate && oldSlot == newSlot) {
+        db.rollback(); // 不需要提交更改
+        return true;
+    }
+
+    // 检查学生在新时间段是否有冲突
+    QString checkStuSql = "SELECT id FROM appointments WHERE student_id = ? AND date = ? AND time_slot = ? AND status != 3 AND id != ?";
+    query.prepare(checkStuSql);
+    query.addBindValue(studentId);
+    query.addBindValue(newDate);
+    query.addBindValue(newSlot);
+    query.addBindValue(appointmentId);
+    if (query.exec() && query.next()) {
+        db.rollback();
+        errorMsg = "您在新的时间段已有其他预约";
+        return false;
+    }
+
+    // 检查医生在新时间段是否空闲
+    // 获取新日期的排班掩码
+    int doctorScheduleFlags = ScheduleDao::getScheduleFlag(db, doctorId, QDate::fromString(newDate, Qt::ISODate));
+    
+    // 检查第 newSlot 位是否被占用 (1表示忙)
+    if ((doctorScheduleFlags >> newSlot) & 1) {
+        db.rollback();
+        errorMsg = "医生在该新时间段已无空闲";
+        return false;
+    }
+
+    // 释放旧的排班 (将 oldSlot 位置 0)
+    QString releaseOldSql = "UPDATE schedules SET time_slot_flags = time_slot_flags & ~(1 << ?) WHERE doctor_id = ? AND date = ?";
+    query.prepare(releaseOldSql);
+    query.addBindValue(oldSlot);
+    query.addBindValue(doctorId);
+    query.addBindValue(oldDate);
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "释放旧排班失败";
+        return false;
+    }
+
+    // 占用新的排班 (将 newSlot 位置 1)
+    // 确保 schedule 记录存在 (如果是新的一天可能没有记录)
+    ScheduleDao::initSchedule(db, doctorId, QDate::fromString(newDate, Qt::ISODate));
+
+    QString occupyNewSql = "UPDATE schedules SET time_slot_flags = time_slot_flags | (1 << ?) WHERE doctor_id = ? AND date = ?";
+    query.prepare(occupyNewSql);
+    query.addBindValue(newSlot);
+    query.addBindValue(doctorId);
+    query.addBindValue(newDate);
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "占用新排班失败";
+        return false;
+    }
+
+    // 更新预约记录
+    QString updateApptSql = "UPDATE appointments SET date = ?, time_slot = ?, status = 0 WHERE id = ?";
+    query.prepare(updateApptSql);
+    query.addBindValue(newDate);
+    query.addBindValue(newSlot);
+    query.addBindValue(appointmentId);
+    
+    if (!query.exec()) {
+        db.rollback();
+        errorMsg = "更新预约记录失败: " + query.lastError().text();
+        return false;
+    }
+
+    // 提交事务
+    if (!db.commit()) {
+        db.rollback();
+        errorMsg = "提交事务失败";
+        return false;
+    }
+
+    return true;
+}
+
+bool AppointmentDao::createModifyRequest(QSqlDatabase db, int appointmentId, int doctorId, const QString &newDate, int newSlot, QString &errorMsg)
+{
+    if (!db.isOpen()) { errorMsg = "数据库未连接"; return false; }
+    
+    // 检查医生该时段是否空闲
+    // 软检查，不锁定，没真正修改
+    int flags = ScheduleDao::getScheduleFlag(db, doctorId, QDate::fromString(newDate, Qt::ISODate));
+    if ((flags >> newSlot) & 1) {
+        errorMsg = "您的排班表中该时段已忙碌，无法发起修改";
+        return false;
+    }
+
+    QJsonObject reqObj;
+    reqObj["date"] = newDate;
+    reqObj["timeSlot"] = newSlot;
+    QString jsonStr = QJsonDocument(reqObj).toJson(QJsonDocument::Compact);
+
+    // 更新预约：Status -> 4, JSON -> 写入
+    // 只能修改状态为 0 (待确认) 或 1 (已确认) 的预约
+    QSqlQuery query(db);
+    query.prepare("UPDATE appointments SET status = 4, modify_request_json = :json WHERE id = :id AND doctor_id = :did AND status IN (0, 1)");
+    query.bindValue(":json", jsonStr);
+    query.bindValue(":id", appointmentId);
+    query.bindValue(":did", doctorId);
+
+    if (!query.exec()) {
+        errorMsg = "发起修改请求失败: " + query.lastError().text();
+        return false;
+    }
+    
+    if (query.numRowsAffected() == 0) {
+        errorMsg = "预约不存在、状态不正确或无权操作";
+        return false;
+    }
+
+    return true;
+}
+
+bool AppointmentDao::resolveModifyRequest(QSqlDatabase db, int appointmentId, int studentId, bool accept, QString &errorMsg)
+{
+    if (!db.transaction()) { errorMsg = "事务启动失败"; return false; }
+
+    QSqlQuery query(db);
+    
+    // 获取预约详情及请求详情 (锁行)
+    query.prepare("SELECT doctor_id, date, time_slot, modify_request_json FROM appointments WHERE id = ? AND student_id = ? AND status = 4 FOR UPDATE");
+    query.addBindValue(appointmentId);
+    query.addBindValue(studentId);
+    
+    if (!query.exec() || !query.next()) {
+        db.rollback();
+        errorMsg = "预约状态异常，可能已处理";
+        return false;
+    }
+
+    int doctorId = query.value("doctor_id").toInt();
+    QString oldDate = query.value("date").toString();
+    int oldSlot = query.value("time_slot").toInt();
+    
+    QByteArray jsonBytes = query.value("modify_request_json").toByteArray();
+    if (jsonBytes.isEmpty()) {
+        db.rollback();
+        errorMsg = "找不到变更请求数据";
+        return false;
+    }
+    QJsonObject reqObj = QJsonDocument::fromJson(jsonBytes).object();
+    QString newDate = reqObj["date"].toString();
+    int newSlot = reqObj["timeSlot"].toInt();
+
+    if (!accept) {
+        // 拒绝
+        // 恢复状态为 1 (已确认)，清空 JSON
+        query.prepare("UPDATE appointments SET status = 1, modify_request_json = NULL WHERE id = ?");
+        query.addBindValue(appointmentId);
+        if (!query.exec()) {
+            db.rollback();
+            errorMsg = "还原状态失败";
+            return false;
+        }
+    } else {
+        // 同意
+        
+        // 释放旧排班
+        if (!ScheduleDao::releaseSlot(db, doctorId, QDate::fromString(oldDate, Qt::ISODate), oldSlot)) {
+            db.rollback();
+            errorMsg = "释放原排班失败";
+            return false;
+        }
+        
+        // 占用新排班
+        if (!ScheduleDao::isSlotAvailable(db, doctorId, QDate::fromString(newDate, Qt::ISODate), newSlot)) {
+            db.rollback();
+            errorMsg = "医生的该新时段已被抢占，修改失败";
+            return false;
+        }
+        
+        if (!ScheduleDao::occupySlot(db, doctorId, QDate::fromString(newDate, Qt::ISODate), newSlot)) {
+            db.rollback();
+            errorMsg = "占用新排班失败";
+            return false;
+        }
+
+        // 更新预约
+        query.prepare("UPDATE appointments SET date = ?, time_slot = ?, status = 1, modify_request_json = NULL WHERE id = ?");
+        query.addBindValue(newDate);
+        query.addBindValue(newSlot);
+        query.addBindValue(appointmentId);
+        if (!query.exec()) {
+            db.rollback();
+            errorMsg = "更新预约失败";
+            return false;
+        }
+    }
+
+    if (!db.commit()) {
+        db.rollback();
+        errorMsg = "提交事务失败";
         return false;
     }
 

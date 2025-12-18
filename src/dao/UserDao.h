@@ -55,9 +55,7 @@ public:
      * @param realName 真实姓名
      * @return int 新用户的ID，失败返回-1
      */
-    static int addUser(QSqlDatabase db, const QString& username,
-                       const QString& passwordHash, int role,
-                       const QString& realName);
+    static int addUser(QSqlDatabase db, const QString& username, const QString& passwordHash, int role, const QString& realName, const QString& gender);
 
     /**
      * @brief 添加医生详细信息
@@ -96,9 +94,7 @@ public:
      * @param passwordHash 密码哈希值，为空时不修改密码
      * @return bool 操作是否成功
      */
-    static bool updateBasicInfo(QSqlDatabase db, int userId,
-                                const QString& realName,
-                                const QString& passwordHash = "");
+    static bool updateBasicInfo(QSqlDatabase db, int userId, const QString& realName, const QString& gender, const QString& passwordHash = "");
 
     /**
      * @brief 更新医生详细信息

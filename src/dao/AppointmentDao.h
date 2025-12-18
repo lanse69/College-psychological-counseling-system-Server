@@ -49,8 +49,7 @@ public:
     QJsonArray getHistoryByDoctorAndStudent(QSqlDatabase db, int doctorId, int studentId, QString &errorMsg);
 
     /**
-     * @brief 获取医生的预约学生列表（聚合查询）
-     * 优化：直接在数据库层进行 GROUP BY 去重和统计，避免全量查询预约记录。
+     * @brief 获取医生的预约学生列表
      * 
      * @param doctorId 医生ID
      * @param errorMsg 错误信息输出
@@ -63,4 +62,16 @@ public:
 
     // 删除已取消的预约
     bool deleteCancelledAppointment(QSqlDatabase db, int appointmentId, int operatorId, QString &errorMsg);
+
+    /**
+     * @brief 学生直接修改预约
+     * @return true 修改成功, false 失败(errorMsg包含原因)
+     */
+    bool modifyAppointmentDirect(QSqlDatabase db, int studentId, int appointmentId, const QString &newDate, int newSlot, QString &errorMsg);
+
+    // 医生发起修改请求 (仅更新状态和JSON，不改实际日期)
+    bool createModifyRequest(QSqlDatabase db, int appointmentId, int doctorId, const QString &newDate, int newSlot, QString &errorMsg);
+
+    // 学生处理修改请求 (同意=true, 拒绝=false)
+    bool resolveModifyRequest(QSqlDatabase db, int appointmentId, int studentId, bool accept, QString &errorMsg);
 };

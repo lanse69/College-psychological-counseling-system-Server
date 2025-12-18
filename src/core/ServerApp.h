@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QMutex>
+#include <QMap>
+#include <QPointer>
 
 #include "network/ClientSocket.h"
 
@@ -22,6 +24,6 @@ public:
 private:
     ServerApp() = default;
 
-    QMap<int, ClientSocket*> m_onlineUsers;
+    QMap<int, QPointer<ClientSocket>> m_onlineUsers;
     QMutex m_mutex;
 };

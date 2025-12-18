@@ -6,6 +6,7 @@
 
 #include "dao/UserDao.h"
 #include "dao/DBManager.h"
+#include "dao/StatisticsDao.h"
 #include "network/ClientSocket.h"
 #include "core/ProtocolDefs.h"
 #include "core/ServerApp.h"
@@ -38,12 +39,13 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
     QString username = data[JsonKeys::USERNAME].toString();
     QString passHash = data[JsonKeys::PASSWORD].toString();
     QString realName = data[JsonKeys::REAL_NAME].toString();
+    QString gender = data["gender"].toString();
     int role = data[JsonKeys::ROLE].toInt();
     QString intro = data[JsonKeys::INTRO].toString();
     QString spec = data[JsonKeys::SPEC].toString();
 
     AsyncExecutor::run(sender,
-        [operatorId, username, passHash, realName, role, intro, spec](QSqlDatabase db) -> QPair<int, QString> {
+        [operatorId, username, passHash, realName, gender, role, intro, spec](QSqlDatabase db) -> QPair<int, QString> {
             
             // 权限校验
             if (!isUserAdmin(db, operatorId)) {
@@ -60,7 +62,7 @@ void AdminHandler::handleAddUser(ClientSocket* sender, const QJsonObject& reques
                 return {StatusCode::CONFLICT, "用户名已存在"};
             }
 
-            int newId = UserDao::addUser(db, username, passHash, role, realName);
+            int newId = UserDao::addUser(db, username, passHash, role, realName, gender);
             if (newId != -1) {
                 if (role == (int)UserRole::DOCTOR) {
                     UserDao::addDoctorInfo(db, newId, intro, spec);
@@ -124,6 +126,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int targetId = data[JsonKeys::TARGET_ID].toInt();
     QString realName = data[JsonKeys::REAL_NAME].toString();
+    QString gender = data["gender"].toString();
     QString passHash = data[JsonKeys::PASSWORD].toString();
     QString intro = data[JsonKeys::INTRO].toString();
     QString spec = data[JsonKeys::SPEC].toString();
@@ -141,7 +144,7 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
                 return {StatusCode::FORBIDDEN, "无权操作", false};
             }
 
-            bool success = UserDao::updateBasicInfo(db, targetId, realName, passHash);
+            bool success = UserDao::updateBasicInfo(db, targetId, realName, gender, passHash);
             
             // 医生需要更新详细信息
             int targetRole = UserDao::getUserRole(db, targetId);
@@ -186,54 +189,49 @@ void AdminHandler::handleGetStatistics(ClientSocket* sender, const QJsonObject& 
 
     AsyncExecutor::run(sender,
         [operatorId, statType](QSqlDatabase db) -> QPair<int, QJsonValue> {
-            if (!isUserAdmin(db, operatorId)) return {StatusCode::FORBIDDEN, QJsonValue()};
+            // 权限校验
+            if (!isUserAdmin(db, operatorId)) {
+                return {StatusCode::FORBIDDEN, QJsonValue()};
+            }
 
+            StatisticsDao dao;
+            QString errorMsg;
             QJsonArray resultArray;
-            QSqlQuery query(db);
 
             if (statType == "consult_trend") {
-                // 统计最近12个月
-                QString sql = R"(
-                    SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)
-                    FROM appointments
-                    WHERE status = 2
-                    GROUP BY month
-                    ORDER BY month DESC LIMIT 12
-                )";
-                if (query.exec(sql)) {
-                    while(query.next()) {
-                        QJsonObject item;
-                        item["label"] = query.value(0).toString();
-                        item["value"] = query.value(1).toInt();
-                        resultArray.append(item);
-                    }
-                }
+                resultArray = dao.getConsultTrend(db, errorMsg);
             } else if (statType == "common_issues") {
-                // 统计 Tag
-                QString sql = R"(
-                    SELECT result_tags, COUNT(*)
-                    FROM consultation_records
-                    WHERE result_tags IS NOT NULL AND result_tags != ''
-                    GROUP BY result_tags
-                    ORDER BY count DESC LIMIT 10
-                )";
-                if (query.exec(sql)) {
-                    while(query.next()) {
-                        QJsonObject item;
-                        item["label"] = query.value(0).toString();
-                        item["value"] = query.value(1).toInt();
-                        resultArray.append(item);
-                    }
-                }
+                resultArray = dao.getCommonIssues(db, errorMsg);
+            } else if (statType == "student_gender") {
+                resultArray = dao.getStudentGenderStats(db, errorMsg);
+            } else if (statType == "top_doctors") {
+                resultArray = dao.getTopDoctors(db, errorMsg);
+            } else if (statType == "peak_times") {
+                resultArray = dao.getPeakTimeSlots(db, errorMsg);
+            } else {
+                // TODO：扩展
+                return {StatusCode::BAD_REQUEST, "未知的统计类型"};
             }
-            // 还有其他类型可扩展...
+
+            if (!errorMsg.isEmpty()) {
+                return {StatusCode::INTERNAL_ERROR, errorMsg}; 
+            }
 
             return {StatusCode::SUCCESS, resultArray};
         },
         [sender, cmd](QPair<int, QJsonValue> result) {
-            sendResponse(sender, cmd, result.first, 
-                         result.first == StatusCode::SUCCESS ? "获取成功" : "获取失败", 
-                         result.second);
+            // result.second 是字符串则是错误信息，是 Array 则是数据
+            // Code != 200，Msg 放错误信息
+            
+            QString msg = "获取成功";
+            QJsonValue dataVal = result.second;
+            
+            if (result.first != StatusCode::SUCCESS) {
+                msg = result.second.toString(); // 错误信息
+                dataVal = QJsonValue::Null;
+            }
+
+            sendResponse(sender, cmd, result.first, msg, dataVal);
         }
     );
 }

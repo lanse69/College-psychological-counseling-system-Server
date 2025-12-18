@@ -83,21 +83,22 @@ bool UserDao::isUsernameExist(QSqlDatabase db, const QString& username)
     return false;
 }
 
-int UserDao::addUser(QSqlDatabase db, const QString& username, const QString& passwordHash, int role, const QString& realName)
+int UserDao::addUser(QSqlDatabase db, const QString& username, const QString& passwordHash, int role, const QString& realName, const QString& gender)
 {
     QSqlQuery query(db);
 
     QString salt = generateSalt();
     QString finalHash = hashPassword(passwordHash, salt);
 
-    query.prepare("INSERT INTO users (username, password, salt, role, real_name) "
-                  "VALUES (:u, :p, :s, :r, :n) RETURNING id");
+    query.prepare("INSERT INTO users (username, password, salt, role, real_name, gender) "
+                  "VALUES (:u, :p, :s, :r, :n, :g) RETURNING id");
     
     query.bindValue(":u", username);
     query.bindValue(":p", finalHash); // 存加盐后的哈希
     query.bindValue(":s", salt);      // 存盐
     query.bindValue(":r", role);
     query.bindValue(":n", realName);
+    query.bindValue(":g", gender);
 
     if (query.exec()) {
         if (query.next()) {
@@ -154,11 +155,11 @@ int UserDao::getUserRole(QSqlDatabase db, int userId)
     return -1; // Not found
 }
 
-bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realName, const QString& passwordHash)
+bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realName, const QString& gender, const QString& passwordHash)
 {
     QSqlQuery query(db);
 
-    QString sql = "UPDATE users SET real_name = :n";
+    QString sql = "UPDATE users SET real_name = :n, gender = :g";
     
     QString salt, finalHash;
     
@@ -173,6 +174,7 @@ bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realNa
 
     query.prepare(sql);
     query.bindValue(":n", realName);
+    query.bindValue(":g", gender);
     query.bindValue(":id", userId);
     
     if (!passwordHash.isEmpty()) {
@@ -184,7 +186,7 @@ bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realNa
         qCritical() << "更新用户基本信息失败:" << query.lastError().text();
         return false;
     }
-    qDebug() << "用户基本信息更新成功，ID:" << userId;
+    qDebug() << "用户基本信息更新成功, ID:" << userId;
     return true;
 }
 
@@ -210,7 +212,7 @@ QJsonArray UserDao::getAllUsers(QSqlDatabase db, int excludeId)
     QJsonArray list;
     QSqlQuery query(db);
 
-    query.prepare("SELECT id, username, real_name, role FROM users WHERE id != :eid ORDER BY id ASC");
+    query.prepare("SELECT id, username, real_name, role, gender FROM users WHERE id != :eid ORDER BY id ASC");
     query.bindValue(":eid", excludeId);
 
     if (query.exec()) {
@@ -220,6 +222,7 @@ QJsonArray UserDao::getAllUsers(QSqlDatabase db, int excludeId)
             obj["username"] = query.value("username").toString();
             obj["realName"] = query.value("real_name").toString();
             obj["role"] = query.value("role").toInt();
+            obj["gender"] = query.value("gender").toString();
             list.append(obj);
         }
     } else {

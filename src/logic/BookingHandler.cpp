@@ -205,17 +205,188 @@ void BookingHandler::handleGetMyBookings(ClientSocket* sender, const QJsonObject
 
 void BookingHandler::handleModifyBookingDirect(ClientSocket* sender, const QJsonObject& request)
 {
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+    // 基础校验
+    int userId = sender->userId();
+    if (userId == -1) {
+        sendErrorResponse(sender, request, StatusCode::UNAUTHORIZED, "用户未登录");
+        return;
+    }
+
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
+    QString newDate = data["date"].toString();
+    int newSlot = data["timeSlot"].toInt();
+
+    // 参数检查
+    if (apptId <= 0 || newDate.isEmpty() || newSlot < 0) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数错误");
+        return;
+    }
+
+    AsyncExecutor::run(sender,
+        [userId, apptId, newDate, newSlot](QSqlDatabase db) -> QPair<bool, QString> {
+            // 校验角色
+            if (UserDao::getUserRole(db, userId) != (int)UserRole::STUDENT) {
+                return {false, "只有学生可以修改预约"};
+            }
+
+            AppointmentDao dao;
+            QString errorMsg;
+            bool success = dao.modifyAppointmentDirect(db, userId, apptId, newDate, newSlot, errorMsg);
+            
+            QString notificationMsg;
+            int doctorId = 0;
+            if (success) {
+                 QSqlQuery q(db);
+                 q.prepare("SELECT doctor_id FROM appointments WHERE id = ?");
+                 q.addBindValue(apptId);
+                 if(q.exec() && q.next()) doctorId = q.value(0).toInt();
+                 
+                 notificationMsg = QString("学生修改了预约 (ID: %1) 到 %2 %3, 请确认。").arg(apptId).arg(newDate).arg(GetTimeSlotText(newSlot));
+            }
+
+            // 将 doctorId 编码进 msg 字符串前缀
+            if (success && doctorId > 0) {
+                return {true, QString::number(doctorId) + ":" + notificationMsg};
+            }
+
+            return {success, errorMsg};
+        },
+        
+        // 主线程回调
+        [sender, request](QPair<bool, QString> result) {
+            if (result.first) {
+                // 解析返回字符串 "doctorId:Message"
+                int sepIdx = result.second.indexOf(':');
+                int doctorId = result.second.left(sepIdx).toInt();
+                QString realMsg = result.second.mid(sepIdx + 1);
+
+                sendSuccessResponse(sender, request, "预约时间修改成功，请等待医生确认");
+
+                // 推送给医生
+                ClientSocket* docSocket = ServerApp::instance().getClient(doctorId);
+                if (docSocket) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                    notify[JsonKeys::MSG] = realMsg;
+                    notify["action"] = "refresh_appointments"; // 通知医生客户端刷新列表
+                    docSocket->sendJson(notify);
+                }
+            } else {
+                sendErrorResponse(sender, request, StatusCode::CONFLICT, result.second);
+            }
+        }
+    );
 }
 
 void BookingHandler::handleModifyRequest(ClientSocket* sender, const QJsonObject& request)
 {
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+    int doctorId = sender->userId();
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
+    QString newDate = data["date"].toString();
+    int newSlot = data["timeSlot"].toInt();
+
+    if (apptId <= 0 || newDate.isEmpty()) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数错误");
+        return;
+    }
+
+    AsyncExecutor::run(sender,
+        [doctorId, apptId, newDate, newSlot](QSqlDatabase db) -> QPair<bool, QString> {
+            if (UserDao::getUserRole(db, doctorId) != (int)UserRole::DOCTOR) {
+                return {false, "只有医生可以发起协商修改"};
+            }
+
+            AppointmentDao dao;
+            QString errorMsg;
+            bool ok = dao.createModifyRequest(db, apptId, doctorId, newDate, newSlot, errorMsg);
+            
+            // 获取学生ID用于推送
+            int studentId = 0;
+            if (ok) {
+                QSqlQuery q(db);
+                q.prepare("SELECT student_id FROM appointments WHERE id = ?");
+                q.addBindValue(apptId);
+                if (q.exec() && q.next()) studentId = q.value(0).toInt();
+                return {true, QString::number(studentId) + ":已发送修改请求给学生"};
+            }
+            return {false, errorMsg};
+        },
+        [sender, request](QPair<bool, QString> res) {
+            if (res.first) {
+                int sep = res.second.indexOf(':');
+                int stuId = res.second.left(sep).toInt();
+                
+                sendSuccessResponse(sender, request, "请求已发送");
+                
+                // 推送给学生
+                ClientSocket* stuSock = ServerApp::instance().getClient(stuId);
+                if (stuSock) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    notify[JsonKeys::CODE] = (int)StatusCode::NEGOTIATION_REQUIRED; // 特殊状态码
+                    notify[JsonKeys::MSG] = "医生请求修改预约时间，请在“我的预约”中查看";
+                    notify["action"] = "refresh_schedule";
+                    stuSock->sendJson(notify);
+                }
+            } else {
+                sendErrorResponse(sender, request, StatusCode::CONFLICT, res.second);
+            }
+        }
+    );
 }
 
 void BookingHandler::handleModifyReply(ClientSocket* sender, const QJsonObject& request)
 {
-    sendErrorResponse(sender, request, StatusCode::NOT_IMPLEMENTED, "功能尚未实现");
+    int studentId = sender->userId();
+    QJsonObject data = request[JsonKeys::DATA].toObject();
+    int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
+    bool accept = data["accept"].toBool();
+
+    AsyncExecutor::run(sender,
+        [studentId, apptId, accept](QSqlDatabase db) -> QPair<bool, QString> {
+            AppointmentDao dao;
+            QString errorMsg;
+            bool ok = dao.resolveModifyRequest(db, apptId, studentId, accept, errorMsg);
+            
+            // 获取医生ID用于推送
+            int doctorId = 0;
+            if (ok) {
+                QSqlQuery q(db);
+                q.prepare("SELECT doctor_id FROM appointments WHERE id = ?");
+                q.addBindValue(apptId);
+                if (q.exec() && q.next()) doctorId = q.value(0).toInt();
+                
+                QString msg = accept ? "学生已同意修改时间" : "学生拒绝了修改请求，保持原时间";
+                return {true, QString::number(doctorId) + ":" + msg};
+            }
+            return {false, errorMsg};
+        },
+        [sender, request](QPair<bool, QString> res) {
+            if (res.first) {
+                int sep = res.second.indexOf(':');
+                int docId = res.second.left(sep).toInt();
+                QString msg = res.second.mid(sep+1);
+
+                sendSuccessResponse(sender, request, "操作成功");
+                
+                // 推送给医生
+                ClientSocket* docSock = ServerApp::instance().getClient(docId);
+                if (docSock) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                    notify[JsonKeys::MSG] = msg;
+                    notify["action"] = "refresh_appointments";
+                    docSock->sendJson(notify);
+                }
+            } else {
+                sendErrorResponse(sender, request, StatusCode::INTERNAL_ERROR, res.second);
+            }
+        }
+    );
 }
 
 void BookingHandler::sendSuccessResponse(
