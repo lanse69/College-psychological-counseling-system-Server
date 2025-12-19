@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QDebug>
 #include <QDate>
+#include <QDateTime>
 
 #include "core/AsyncExecutor.h"
 #include "dao/DBManager.h"
@@ -13,6 +14,39 @@
 #include "core/ProtocolDefs.h"
 #include "core/ServerApp.h"
 #include "network/ClientSocket.h"
+
+// 判断时间段是否已过
+static bool isSlotExpired(const QString &dateStr, int slot) {
+    QDate date = QDate::fromString(dateStr, Qt::ISODate);
+    if (!date.isValid()) return true; // 格式错误视为无效
+
+    QDateTime now = QDateTime::currentDateTime();
+    
+    // 过去日期 -> 已过期
+    if (date < now.date()) return true;
+    
+    // 未来日期 -> 未过期
+    if (date > now.date()) return false;
+
+    // 今天 -> 检查具体时间
+    int startHour = 0;
+    switch (slot) {
+        case 0: startHour = 8;  break; // 08:30
+        case 1: startHour = 9;  break; // 09:30
+        case 2: startHour = 10; break; // 10:30
+        case 3: startHour = 14; break; // 14:30
+        case 4: startHour = 15; break; // 15:30
+        case 5: startHour = 16; break; // 16:30
+        case 6: startHour = 17; break; // 17:30
+        default: return true; // 无效 slot
+    }
+
+    // 构造该 slot 的开始时间
+    QTime slotTime(startHour, 30);
+    
+    // 当前时间 >= slot开始时间，则视为已过期
+    return now.time() >= slotTime;
+}
 
 void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject& request)
 {
@@ -58,6 +92,12 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
 
     if (qDate < QDate::currentDate()) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "不能预约过去的日期");
+        return;
+    }
+
+    // 检查时间是否已过
+    if (isSlotExpired(dateStr, timeSlot)) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "该时间段已过，无法预约");
         return;
     }
 
@@ -154,16 +194,51 @@ void BookingHandler::handleCancelBooking(ClientSocket* sender, const QJsonObject
     }
 
     AsyncExecutor::run(sender,
-        [appointmentId](QSqlDatabase db) -> QPair<bool, QString> {
+        [appointmentId, userId](QSqlDatabase db) -> QPair<bool, QString> {
+            // 先查询医生ID，用于后续推送通知
+            int doctorId = 0;
+            {
+                QSqlQuery q(db);
+                q.prepare("SELECT doctor_id FROM appointments WHERE id = ?");
+                q.addBindValue(appointmentId);
+                if(q.exec() && q.next()) doctorId = q.value(0).toInt();
+            }
+
+            // 执行取消操作
             AppointmentDao dao;
             QString errorMsg;
             bool success = dao.cancelAppointment(db, appointmentId, errorMsg);
-            return {success, success ? "预约取消成功" : errorMsg};
+
+            // 将结果和医生ID打包返回
+            if (success) {
+                // 格式: "DocID:Message"
+                return {true, QString::number(doctorId) + ":预约取消成功"};
+            } else {
+                return {false, errorMsg};
+            }
         },
 
         [sender, request](QPair<bool, QString> result) {
             if (result.first) {
-                sendSuccessResponse(sender, request, result.second);
+                // 解析返回数据
+                int sepIdx = result.second.indexOf(':');
+                int doctorId = result.second.left(sepIdx).toInt();
+                QString msg = result.second.mid(sepIdx + 1);
+
+                // 回复学生
+                sendSuccessResponse(sender, request, msg);
+
+                // 推送通知给医生
+                ClientSocket* docSocket = ServerApp::instance().getClient(doctorId);
+                if (docSocket) {
+                    QJsonObject notify;
+                    notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                    notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                    notify[JsonKeys::MSG] = "有学生取消了预约，该时段已自动释放为空闲。";
+                    // 通知医生客户端刷新预约列表和排班表
+                    notify["action"] = "refresh_appointments"; 
+                    docSocket->sendJson(notify);
+                }
             } else {
                 sendErrorResponse(sender, request, StatusCode::INTERNAL_ERROR, result.second);
             }
@@ -220,6 +295,12 @@ void BookingHandler::handleModifyBookingDirect(ClientSocket* sender, const QJson
     // 参数检查
     if (apptId <= 0 || newDate.isEmpty() || newSlot < 0) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数错误");
+        return;
+    }
+
+    // 检查时间是否已过
+    if (isSlotExpired(newDate, newSlot)) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "无法修改到过去的时间段");
         return;
     }
 
@@ -290,6 +371,12 @@ void BookingHandler::handleModifyRequest(ClientSocket* sender, const QJsonObject
 
     if (apptId <= 0 || newDate.isEmpty()) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数错误");
+        return;
+    }
+
+    // 检查时间是否已过
+    if (isSlotExpired(newDate, newSlot)) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "无法修改到过去的时间段");
         return;
     }
 

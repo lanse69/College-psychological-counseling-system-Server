@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QPair>
+#include <QSqlQuery> 
+#include <QSqlError>
 
 #include "dao/UserDao.h"
 #include "dao/AppointmentDao.h"
@@ -12,6 +14,7 @@
 #include "network/ClientSocket.h"
 #include "core/ProtocolDefs.h"
 #include "core/AsyncExecutor.h"
+#include "core/ServerApp.h"
 
 struct OpResult {
     bool success;
@@ -361,16 +364,52 @@ void DoctorHandler::handleUpdateSchedule(ClientSocket* sender, const QJsonObject
     }
 
     AsyncExecutor::run(sender,
-        [doctorId, date, mask](QSqlDatabase db) -> bool {
-            // TODO: 检查是否为医生
+        [doctorId, date, mask](QSqlDatabase db) -> QPair<bool, QString> {
+            // 查询该医生在该日期所有“占用中”的预约
+            // 状态 0(待确认), 1(已确认), 4(待修改确认) 都视为占用
+            QSqlQuery query(db);
+            query.prepare(R"(
+                SELECT time_slot FROM appointments 
+                WHERE doctor_id = ? AND date = ? AND status IN (0, 1, 4)
+            )");
+            query.addBindValue(doctorId);
+            query.addBindValue(date);
+            
+            if (!query.exec()) {
+                return {false, "查询预约冲突失败"};
+            }
 
-            return ScheduleDao::updateScheduleMask(db, doctorId, date, mask);
-        },
-        [sender](bool success) {
-            if (success) {
-                sendSuccessResponse(sender, (int)CmdType::UPDATE_SCHEDULE, QJsonValue::Null, "排班更新成功");
+            int activeApptsMask = 0;
+            while (query.next()) {
+                int slot = query.value(0).toInt();
+                if (slot >= 0 && slot <= 6) {
+                    activeApptsMask |= (1 << slot);
+                }
+            }
+
+            // 校验冲突
+            // activeApptsMask 的某位是 1 (有预约)，但 mask 的对应位是 0 (医生设为空闲)，则冲突
+            for (int i = 0; i <= 6; ++i) {
+                bool hasAppt = (activeApptsMask >> i) & 1;
+                bool settingFree = !((mask >> i) & 1); // 0是空闲
+
+                if (hasAppt && settingFree) {
+                    return {false, QString("时段 %1 尚有未完成的预约，无法设为空闲").arg(GetTimeSlotText(i))};
+                }
+            }
+
+            // 更新
+            if (ScheduleDao::updateScheduleMask(db, doctorId, date, mask)) {
+                return {true, "排班更新成功"};
             } else {
-                sendErrorResponse(sender, (int)CmdType::UPDATE_SCHEDULE, (int)StatusCode::INTERNAL_ERROR, "排班更新失败");
+                return {false, "数据库更新失败"};
+            }
+        },
+        [sender, request](QPair<bool, QString> result) {
+            if (result.first) {
+                sendSuccessResponse(sender, (int)CmdType::UPDATE_SCHEDULE, QJsonValue::Null, result.second);
+            } else {
+                sendErrorResponse(sender, (int)CmdType::UPDATE_SCHEDULE, (int)StatusCode::CONFLICT, result.second);
             }
         }
     );
@@ -403,22 +442,58 @@ void DoctorHandler::sendErrorResponse(ClientSocket* sender, int cmd, int code, c
 
 void DoctorHandler::handleDeleteBooking(ClientSocket* sender, const QJsonObject& request)
 {
-    int userId = sender->userId();
+    int doctorId = sender->userId();
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int apptId = data[JsonKeys::APPOINTMENT_ID].toInt();
 
+    // 传递删除结果和学生ID
+    struct DelResult {
+        bool success;
+        QString msg;
+        int studentId;
+    };
+
     AsyncExecutor::run(sender,
-        [userId, apptId](QSqlDatabase db) -> QPair<bool, QString> {
+        [doctorId, apptId](QSqlDatabase db) -> DelResult {
+            int studentId = 0;
+            QSqlQuery q(db);
+            q.prepare("SELECT student_id FROM appointments WHERE id = ? AND doctor_id = ?");
+            q.addBindValue(apptId);
+            q.addBindValue(doctorId);
+            if (q.exec() && q.next()) {
+                studentId = q.value(0).toInt();
+            }
+
             AppointmentDao dao;
             QString errorMsg;
-            bool success = dao.deleteCancelledAppointment(db, apptId, userId, errorMsg);
-            return {success, success ? "记录已删除" : errorMsg};
+            bool success = dao.deleteCancelledAppointment(db, apptId, doctorId, errorMsg);
+            
+            if (!success) {
+                return {false, errorMsg, 0};
+            }
+            return {true, "记录已删除", studentId};
         },
-        [sender, request](QPair<bool, QString> result) {
-            if (result.first) {
-                sendSuccessResponse(sender, request[JsonKeys::CMD].toInt(), QJsonValue::Null, result.second);
+        
+        // 主线程回调
+        [sender, request](DelResult res) {
+            if (res.success) {
+                // 回复医生
+                sendSuccessResponse(sender, request[JsonKeys::CMD].toInt(), QJsonValue::Null, res.msg);
+
+                // 推送通知给学生
+                if (res.studentId > 0) {
+                    ClientSocket* stuSock = ServerApp::instance().getClient(res.studentId);
+                    if (stuSock) {
+                        QJsonObject notify;
+                        notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                        notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                        notify[JsonKeys::MSG] = ""; 
+                        notify["action"] = "refresh_schedule"; 
+                        stuSock->sendJson(notify);
+                    }
+                }
             } else {
-                sendErrorResponse(sender, request[JsonKeys::CMD].toInt(), (int)StatusCode::BAD_REQUEST, result.second);
+                sendErrorResponse(sender, request[JsonKeys::CMD].toInt(), (int)StatusCode::BAD_REQUEST, res.msg);
             }
         }
     );

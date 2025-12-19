@@ -713,33 +713,60 @@ bool AppointmentDao::rejectAppointment(QSqlDatabase db, int appointmentId, int d
         return false;
     }
 
-    // 先检查预约是否存在且属于该医生
-    QSqlQuery checkQuery(db);
-    QString checkSql = "SELECT id, status FROM appointments WHERE id = ? AND doctor_id = ?";
-    checkQuery.prepare(checkSql);
-    checkQuery.addBindValue(appointmentId);
-    checkQuery.addBindValue(doctorId);
+    // 开启事务，保证状态更新和排班释放的一致性
+    if (!db.transaction()) { 
+        errorMsg = "事务启动失败"; 
+        return false; 
+    }
 
-    if (!checkQuery.exec()) {
-        errorMsg = "检查预约失败: " + checkQuery.lastError().text();
+    QSqlQuery query(db);
+
+    // 查询预约信息 (日期和时段)
+    query.prepare("SELECT date, time_slot, status FROM appointments WHERE id = ? AND doctor_id = ? FOR UPDATE");
+    query.addBindValue(appointmentId);
+    query.addBindValue(doctorId);
+
+    if (!query.exec() || !query.next()) {
+        db.rollback();
+        errorMsg = "预约不存在或无权操作";
+        return false;
+    }
+    
+    QDate date = query.value("date").toDate();
+    int timeSlot = query.value("time_slot").toInt();
+    int currentStatus = query.value("status").toInt();
+
+    if (currentStatus != 0) {
+        db.rollback();
+        errorMsg = "预约状态不允许拒绝 (非待确认状态)";
         return false;
     }
 
-    if (!checkQuery.next()) {
-        errorMsg = "预约不存在或无权限操作";
+    // 更新状态为 3 (已取消)
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare("UPDATE appointments SET status = 3 WHERE id = ?");
+    updateQuery.addBindValue(appointmentId);
+    if (!updateQuery.exec()) {
+        db.rollback();
+        errorMsg = "更新状态失败";
         return false;
     }
 
-    int currentStatus = checkQuery.value("status").toInt();
-    if (currentStatus != 0) { // 只有待确认状态才能拒绝
-        errorMsg = "预约状态不允许拒绝";
+    // 释放排班 (将对应位置 0)
+    // AND NOT (1 << slot)
+    QSqlQuery releaseQuery(db);
+    releaseQuery.prepare("UPDATE schedules SET time_slot_flags = time_slot_flags & ~(1 << ?) WHERE doctor_id = ? AND date = ?");
+    releaseQuery.addBindValue(timeSlot);
+    releaseQuery.addBindValue(doctorId);
+    releaseQuery.addBindValue(date);
+    
+    if (!releaseQuery.exec()) {
+        db.rollback();
+        errorMsg = "释放排班失败";
         return false;
     }
 
-    checkQuery.finish();
-
-    // 更新预约状态为已取消（状态3）
-    return updateAppointmentStatus(db, appointmentId, 3, errorMsg);
+    return db.commit();
 }
 
 bool AppointmentDao::completeConsultation(QSqlDatabase db, int appointmentId, int doctorId, QString &errorMsg)
@@ -749,34 +776,55 @@ bool AppointmentDao::completeConsultation(QSqlDatabase db, int appointmentId, in
         return false;
     }
 
-    // 先检查预约是否存在且属于该医生
-    QSqlQuery checkQuery(db);
-    QString checkSql = "SELECT id, status FROM appointments WHERE id = ? AND doctor_id = ?";
-    checkQuery.prepare(checkSql);
-    checkQuery.addBindValue(appointmentId);
-    checkQuery.addBindValue(doctorId);
+    if (!db.transaction()) { errorMsg = "事务启动失败"; return false; }
 
-    if (!checkQuery.exec()) {
-        errorMsg = "检查预约失败: " + checkQuery.lastError().text();
+    QSqlQuery query(db);
+
+    // 查询信息
+    query.prepare("SELECT date, time_slot, status FROM appointments WHERE id = ? AND doctor_id = ? FOR UPDATE");
+    query.addBindValue(appointmentId);
+    query.addBindValue(doctorId);
+
+    if (!query.exec() || !query.next()) {
+        db.rollback();
+        errorMsg = "预约不存在或无权操作";
         return false;
     }
+    
+    QDate date = query.value("date").toDate();
+    int timeSlot = query.value("time_slot").toInt();
+    int currentStatus = query.value("status").toInt();
 
-    if (!checkQuery.next()) {
-        errorMsg = "预约不存在或无权限操作";
-        return false;
-    }
-
-    int currentStatus = checkQuery.value("status").toInt();
-    // 只有已确认状态的预约才能完成咨询
     if (currentStatus != 1) {
-        errorMsg = "只有已确认的预约才能完成咨询";
+        db.rollback();
+        errorMsg = "只有已确认的预约才能完成";
         return false;
     }
 
-    checkQuery.finish();
+    // 更新状态为 2 (已完成)
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare("UPDATE appointments SET status = 2 WHERE id = ?");
+    updateQuery.addBindValue(appointmentId);
+    if (!updateQuery.exec()) {
+        db.rollback();
+        errorMsg = "更新状态失败";
+        return false;
+    }
 
-    // 更新预约状态为已完成（状态2）
-    return updateAppointmentStatus(db, appointmentId, 2, errorMsg);
+    // 释放排班
+    QSqlQuery releaseQuery(db);
+    releaseQuery.prepare("UPDATE schedules SET time_slot_flags = time_slot_flags & ~(1 << ?) WHERE doctor_id = ? AND date = ?");
+    releaseQuery.addBindValue(timeSlot);
+    releaseQuery.addBindValue(doctorId);
+    releaseQuery.addBindValue(date);
+    
+    if (!releaseQuery.exec()) {
+        db.rollback();
+        errorMsg = "释放排班失败";
+        return false;
+    }
+
+    return db.commit();
 }
 
 QJsonArray AppointmentDao::getDoctorPatients(QSqlDatabase db, int doctorId, QString &errorMsg)
