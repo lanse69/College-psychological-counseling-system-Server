@@ -4,6 +4,7 @@
 #include <QSqlError>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QDebug>
 #include <QDateTime>
 

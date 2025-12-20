@@ -252,19 +252,50 @@ void DoctorHandler::handleCompleteConsultation(ClientSocket* sender, const QJson
         return;
     }
 
+    // 定义结果结构体
+    struct CompleteResult {
+        bool success;
+        QString msg;
+        int studentId;
+    };
+
     // 完成咨询
     AsyncExecutor::run(sender,
-        [appointmentId, doctorId](QSqlDatabase db) -> QPair<bool, QString> {
+        [appointmentId, doctorId](QSqlDatabase db) -> CompleteResult {
+            // 先查询学生ID用于推送
+            int studentId = 0;
+            QSqlQuery q(db);
+            q.prepare("SELECT student_id FROM appointments WHERE id = ?");
+            q.addBindValue(appointmentId);
+            if (q.exec() && q.next()) studentId = q.value(0).toInt();
+
+            // 执行完成逻辑
             AppointmentDao dao;
             QString errorMsg;
             bool success = dao.completeConsultation(db, appointmentId, doctorId, errorMsg);
-            return {success, success ? "咨询已完成" : errorMsg};
+            
+            if (!success) return {false, errorMsg, 0};
+            return {true, "咨询已完成", studentId};
         },
-        [sender](QPair<bool, QString> result) {
-            if (result.first) {
-                sendSuccessResponse(sender, (int)CmdType::DOCTOR_COMPLETE_CONSULTATION, QJsonValue::Null, result.second);
+        [sender, request](CompleteResult result) {
+            if (result.success) {
+                // 回复医生
+                sendSuccessResponse(sender, (int)CmdType::DOCTOR_COMPLETE_CONSULTATION, QJsonValue::Null, result.msg);
+
+                // 推送通知给学生
+                if (result.studentId > 0) {
+                    ClientSocket* stuSock = ServerApp::instance().getClient(result.studentId);
+                    if (stuSock) {
+                        QJsonObject notify;
+                        notify[JsonKeys::CMD] = (int)CmdType::PUSH_NOTIFICATION;
+                        notify[JsonKeys::CODE] = (int)StatusCode::SUCCESS;
+                        notify[JsonKeys::MSG] = "医生已完成咨询报告，您现在可以查看结果了。";
+                        notify["action"] = "refresh_schedule"; // 触发学生端刷新
+                        stuSock->sendJson(notify);
+                    }
+                }
             } else {
-                sendErrorResponse(sender, (int)CmdType::DOCTOR_COMPLETE_CONSULTATION, (int)StatusCode::INTERNAL_ERROR, result.second);
+                sendErrorResponse(sender, (int)CmdType::DOCTOR_COMPLETE_CONSULTATION, (int)StatusCode::INTERNAL_ERROR, result.msg);
             }
         }
     );

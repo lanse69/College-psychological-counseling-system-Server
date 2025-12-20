@@ -125,6 +125,10 @@ void AdminHandler::handleUpdateUserInfo(ClientSocket* sender, const QJsonObject&
 
     QJsonObject data = request[JsonKeys::DATA].toObject();
     int targetId = data[JsonKeys::TARGET_ID].toInt();
+    // targetId 为 0，说明是用户修改自己
+    if (targetId == 0) {
+        targetId = operatorId;
+    }
     QString realName = data[JsonKeys::REAL_NAME].toString();
     QString gender = data["gender"].toString();
     QString passHash = data[JsonKeys::PASSWORD].toString();
