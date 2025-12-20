@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QDebug>
+#include <QDate>
 #include <QDateTime>
 
 #include "DBManager.h"
@@ -71,11 +72,17 @@ bool AppointmentDao::createAppointment(QSqlDatabase db, int studentId, int docto
         return false;
     }
 
+    // 计算默认掩码：周末默认全忙(127)，工作日默认全闲(0)
+    QDate qDate = QDate::fromString(date, Qt::ISODate);
+    int defaultMask = (qDate.dayOfWeek() >= 6) ? 127 : 0;
+
     // 检查排班表冲突 (schedules) 并 确保排班记录存在
-    QString initScheduleSql = "INSERT INTO schedules (doctor_id, date, time_slot_flags) VALUES (?, ?, 0) ON CONFLICT (doctor_id, date) DO NOTHING";
+    QString initScheduleSql = "INSERT INTO schedules (doctor_id, date, time_slot_flags) VALUES (?, ?, ?) ON CONFLICT (doctor_id, date) DO NOTHING";
     query.prepare(initScheduleSql);
     query.addBindValue(doctorId);
     query.addBindValue(date);
+    query.addBindValue(defaultMask);
+
     if (!query.exec()) {
         db.rollback();
         errorMsg = "初始化排班失败: " + query.lastError().text();

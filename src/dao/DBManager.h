@@ -38,7 +38,6 @@ private:
     DBManager(const DBManager&) = delete;
     DBManager& operator=(const DBManager&) = delete;
 
-    bool createTable(const QString &tableName, const QString &sql);
     void seedDefaultAdmin();
 
     QSqlDatabase m_mainDb; // 主线程连接对象

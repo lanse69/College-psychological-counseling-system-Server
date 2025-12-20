@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QCryptographicHash>
 #include <QRandomGenerator>
+#include <QStringList>
 
 #include "DBManager.h"
 
@@ -157,26 +158,40 @@ int UserDao::getUserRole(QSqlDatabase db, int userId)
 
 bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realName, const QString& gender, const QString& passwordHash)
 {
-    QSqlQuery query(db);
-
-    QString sql = "UPDATE users SET real_name = :n, gender = :g";
+    QStringList updateFields;
     
+    // 判断哪些字段需要更新
+    if (!realName.isEmpty()) {
+        updateFields << "real_name = :n";
+    }
+    if (!gender.isEmpty()) {
+        updateFields << "gender = :g";
+    }
+    
+    // 只有提供了新密码才更新
     QString salt, finalHash;
-    
     if (!passwordHash.isEmpty()) {
         salt = generateSalt();
         finalHash = hashPassword(passwordHash, salt);
-        
-        sql += ", password = :p, salt = :s";
+        updateFields << "password = :p" << "salt = :s";
     }
-    
-    sql += " WHERE id = :id";
 
+    // 如果没有任何字段需要更新，直接返回成功
+    if (updateFields.isEmpty()) {
+        qDebug() << "没有基础信息需要更新，跳过。ID:" << userId;
+        return true; 
+    }
+
+    QString sql = "UPDATE users SET " + updateFields.join(", ") + " WHERE id = :id";
+
+    QSqlQuery query(db);
     query.prepare(sql);
-    query.bindValue(":n", realName);
-    query.bindValue(":g", gender);
+    
+    // 动态绑定参数
     query.bindValue(":id", userId);
     
+    if (!realName.isEmpty()) query.bindValue(":n", realName);
+    if (!gender.isEmpty())   query.bindValue(":g", gender);
     if (!passwordHash.isEmpty()) {
         query.bindValue(":p", finalHash);
         query.bindValue(":s", salt);
@@ -192,18 +207,36 @@ bool UserDao::updateBasicInfo(QSqlDatabase db, int userId, const QString& realNa
 
 bool UserDao::updateDoctorInfo(QSqlDatabase db, int userId, const QString& intro, const QString& spec)
 {
+    QStringList updateFields;
+
+    // 动态判断
+    if (!intro.isEmpty()) {
+        updateFields << "intro = :intro";
+    }
+    if (!spec.isEmpty()) {
+        updateFields << "specialized_field = :spec";
+    }
+
+    // 如果没有字段需要更新
+    if (updateFields.isEmpty()) {
+        return true;
+    }
+
+    QString sql = "UPDATE doctor_info SET " + updateFields.join(", ") + " WHERE user_id = :id";
+
     QSqlQuery query(db);
-    query.prepare(
-        "UPDATE doctor_info SET intro = :intro, specialized_field = :spec WHERE user_id = :id");
-    query.bindValue(":intro", intro);
-    query.bindValue(":spec", spec);
+    query.prepare(sql);
+
+    // 动态绑定
     query.bindValue(":id", userId);
+    if (!intro.isEmpty()) query.bindValue(":intro", intro);
+    if (!spec.isEmpty())  query.bindValue(":spec", spec);
 
     if (!query.exec()) {
         qCritical() << "更新医生信息失败:" << query.lastError().text();
         return false;
     }
-    qDebug() << "医生信息更新成功，用户ID:" << userId;
+    qDebug() << "医生信息更新成功(动态)，用户ID:" << userId;
     return true;
 }
 
@@ -248,9 +281,11 @@ QJsonArray UserDao::getDoctorList(QSqlDatabase db)
     QSqlQuery query(db);
 
     QString sql = R"(
-        SELECT u.id, u.real_name, u.username, d.intro, d.specialized_field 
+        SELECT u.id, u.real_name, u.username, 
+            COALESCE(d.intro, '暂无简介') as intro, 
+            COALESCE(d.specialized_field, '通用心理咨询') as specialized_field 
         FROM users u 
-        JOIN doctor_info d ON u.id = d.user_id 
+        LEFT JOIN doctor_info d ON u.id = d.user_id
         WHERE u.role = 2 
         ORDER BY u.id ASC
     )";

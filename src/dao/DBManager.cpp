@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QRandomGenerator>
 #include <QDebug>
+#include <QMap>
 
 #include "core/ConfigManager.h"
 
@@ -139,11 +140,11 @@ void DBManager::closeThreadConnection(const QString &connectionName)
 
 bool DBManager::initTables()
 {
-    bool success = true;
+    QMap<QString, QString> tables;
 
     // 用户表 (users)
     // role: 1=Student, 2=Doctor, 3=Admin
-    success &= createTable("users", R"(
+    tables["users"] = R"(
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) NOT NULL UNIQUE,
@@ -155,11 +156,11 @@ bool DBManager::initTables()
             age INT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-    )");
+    )";
 
     // 医生信息表 (doctor_info)
     // 扩展 users 表，存储医生特有信息
-    success &= createTable("doctor_info", R"(
+    tables["doctor_info"] = R"(
         CREATE TABLE IF NOT EXISTS doctor_info (
             user_id INT PRIMARY KEY,
             intro TEXT,
@@ -167,7 +168,7 @@ bool DBManager::initTables()
             avatar_path VARCHAR(255),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    )");
+    )";
 
     // 医生排班表 (schedules)
     /*
@@ -187,7 +188,7 @@ bool DBManager::initTables()
      * Bit 7 (1 << 7): 16:00 - 17:00
      * Bit 8 (1 << 8): 17:00 - 18:00
      */
-    success &= createTable("schedules", R"(
+    tables["schedules"] = R"(
         CREATE TABLE IF NOT EXISTS schedules (
             id SERIAL PRIMARY KEY,
             doctor_id INT NOT NULL,
@@ -197,11 +198,11 @@ bool DBManager::initTables()
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE,
             UNIQUE (doctor_id, date)
         );
-    )");
+    )";
 
     // 预约记录表 (appointments)
     // status: 0=Pending, 1=Confirmed, 2=Completed, 3=Cancelled
-    success &= createTable("appointments", R"(
+    tables["appointments"] = R"(
         CREATE TABLE IF NOT EXISTS appointments (
             id SERIAL PRIMARY KEY,
             student_id INT NOT NULL,
@@ -214,11 +215,11 @@ bool DBManager::initTables()
             FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    )");
+    )";
 
     // 问卷模板表 (surveys)
     // content_json: 存储题目数组
-    success &= createTable("surveys", R"(
+    tables["surveys"] = R"(
         CREATE TABLE IF NOT EXISTS surveys (
             id SERIAL PRIMARY KEY,
             doctor_id INT NOT NULL,
@@ -227,11 +228,11 @@ bool DBManager::initTables()
             create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    )");
+    )";
 
     // 问卷回答表 (survey_answers)
     // answers_json: 存储学生提交的答案
-    success &= createTable("survey_answers", R"(
+    tables["survey_answers"] = R"(
         CREATE TABLE IF NOT EXISTS survey_answers (
             id SERIAL PRIMARY KEY,
             appt_id INT NOT NULL,
@@ -241,10 +242,10 @@ bool DBManager::initTables()
             FOREIGN KEY (appt_id) REFERENCES appointments(id) ON DELETE CASCADE,
             FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    )");
+    )";
 
     // 咨询记录/报告表 (consultation_records)
-    success &= createTable("consultation_records", R"(
+    tables["consultation_records"] = R"(
         CREATE TABLE IF NOT EXISTS consultation_records (
             id SERIAL PRIMARY KEY,
             appt_id INT NOT NULL,
@@ -255,12 +256,20 @@ bool DBManager::initTables()
             FOREIGN KEY (appt_id) REFERENCES appointments(id) ON DELETE CASCADE,
             FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    )");
+    )";
+
+    bool allSuccess = true;
+    QSqlQuery query(m_mainDb);
+
+    for (auto it = tables.begin(); it != tables.end(); ++it) {
+        if (!query.exec(it.value())) {
+            qCritical() << "创建表失败 [" << it.key() << "]:" << query.lastError().text();
+            allSuccess = false;
+        }
+    }
 
     // 创建 GIN 索引
-    if (success) {
-        QSqlQuery query(m_mainDb);
-        
+    if (allSuccess) {        
         // 为问卷内容的 JSONB 创建 GIN 索引
         if (!query.exec("CREATE INDEX IF NOT EXISTS idx_surveys_content ON surveys USING GIN (content_json)")) {
             qWarning() << "警告: 创建 surveys GIN 索引失败:" << query.lastError().text();
@@ -273,7 +282,6 @@ bool DBManager::initTables()
     }
 
     // 为 users 表的 role 字段创建索引
-    QSqlQuery query(m_mainDb);
     QString createIndexSql = "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)";
     
     if (!query.exec(createIndexSql)) {
@@ -281,21 +289,11 @@ bool DBManager::initTables()
     }
 
     // 初始化默认数据
-    if (success) {
+    if (allSuccess) {
         seedDefaultAdmin();
     }
 
-    return success;
-}
-
-bool DBManager::createTable(const QString &tableName, const QString &sql)
-{
-    QSqlQuery query(m_mainDb);
-    if (!query.exec(sql)) {
-        qCritical() << "创建表失败：" << tableName << ":" << query.lastError().text();
-        return false;
-    }
-    return true;
+    return allSuccess;
 }
 
 void DBManager::seedDefaultAdmin()

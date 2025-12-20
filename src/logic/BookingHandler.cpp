@@ -15,39 +15,6 @@
 #include "core/ServerApp.h"
 #include "network/ClientSocket.h"
 
-// 判断时间段是否已过
-static bool isSlotExpired(const QString &dateStr, int slot) {
-    QDate date = QDate::fromString(dateStr, Qt::ISODate);
-    if (!date.isValid()) return true; // 格式错误视为无效
-
-    QDateTime now = QDateTime::currentDateTime();
-    
-    // 过去日期 -> 已过期
-    if (date < now.date()) return true;
-    
-    // 未来日期 -> 未过期
-    if (date > now.date()) return false;
-
-    // 今天 -> 检查具体时间
-    int startHour = 0;
-    switch (slot) {
-        case 0: startHour = 8;  break; // 08:30
-        case 1: startHour = 9;  break; // 09:30
-        case 2: startHour = 10; break; // 10:30
-        case 3: startHour = 14; break; // 14:30
-        case 4: startHour = 15; break; // 15:30
-        case 5: startHour = 16; break; // 16:30
-        case 6: startHour = 17; break; // 17:30
-        default: return true; // 无效 slot
-    }
-
-    // 构造该 slot 的开始时间
-    QTime slotTime(startHour, 30);
-    
-    // 当前时间 >= slot开始时间，则视为已过期
-    return now.time() >= slotTime;
-}
-
 void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject& request)
 {
     // 基础校验
@@ -75,8 +42,13 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
     int timeSlot = data["timeSlot"].toInt();
 
     // 校验参数逻辑合法性
-    if (doctorId <= 0 || dateStr.isEmpty() || timeSlot < 0 || timeSlot > MAX_TIME_SLOT_INDEX) {
+    if (doctorId <= 0 || dateStr.isEmpty() || timeSlot < 0 || timeSlot > TIME_SLOT_COUNT) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "参数格式错误或时间段无效");
+        return;
+    }
+
+    if (IsTimeSlotExpired(dateStr, timeSlot)) {
+        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "该时间段已过，无法预约");
         return;
     }
 
@@ -92,12 +64,6 @@ void BookingHandler::handleCreateBooking(ClientSocket* sender, const QJsonObject
 
     if (qDate < QDate::currentDate()) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "不能预约过去的日期");
-        return;
-    }
-
-    // 检查时间是否已过
-    if (isSlotExpired(dateStr, timeSlot)) {
-        sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "该时间段已过，无法预约");
         return;
     }
 
@@ -298,8 +264,7 @@ void BookingHandler::handleModifyBookingDirect(ClientSocket* sender, const QJson
         return;
     }
 
-    // 检查时间是否已过
-    if (isSlotExpired(newDate, newSlot)) {
+    if (IsTimeSlotExpired(newDate, newSlot)) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "无法修改到过去的时间段");
         return;
     }
@@ -374,8 +339,7 @@ void BookingHandler::handleModifyRequest(ClientSocket* sender, const QJsonObject
         return;
     }
 
-    // 检查时间是否已过
-    if (isSlotExpired(newDate, newSlot)) {
+    if (IsTimeSlotExpired(newDate, newSlot)) {
         sendErrorResponse(sender, request, StatusCode::BAD_REQUEST, "无法修改到过去的时间段");
         return;
     }

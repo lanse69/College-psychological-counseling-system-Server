@@ -99,19 +99,16 @@ void RequestRouter::dispatch(
             AdminHandler::handleGetUserList(sender, request);
             break;
 
-        // 医生业务
         case CmdType::GET_DOCTOR_LIST:
+        case CmdType::STUDENT_GET_DOCTOR_LIST:
             DoctorHandler::handleGetDoctorList(sender, request);
             break;
+        
         case CmdType::GET_DOCTOR_DETAIL:
             DoctorHandler::handleGetDoctorDetail(sender, request);
             break;
         case CmdType::DOCTOR_GET_PATIENT_HISTORY:
             DoctorHandler::handleGetPatientHistory(sender, request);
-            break;
-
-        case CmdType::STUDENT_GET_DOCTOR_LIST:
-            DoctorHandler::handleStudentGetDoctorList(sender, request);
             break;
             
         // 医生/管理员获取排班表

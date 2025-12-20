@@ -9,13 +9,17 @@
 bool ScheduleDao::initSchedule(QSqlDatabase db, int doctorId, QDate date) {
     QSqlQuery query(db);
 
+    // 如果是周六(6)或周日(7)，默认掩码为 127 (全休息)，否则为 0 (全空闲)
+    int defaultMask = (date.dayOfWeek() >= 6) ? 127 : 0;
+
     query.prepare(R"(
         INSERT INTO schedules (doctor_id, date, time_slot_flags)
-        VALUES (:did, :date, 0)
+        VALUES (:did, :date, :mask)
         ON CONFLICT (doctor_id, date) DO NOTHING
     )");
     query.bindValue(":did", doctorId);
     query.bindValue(":date", date);
+    query.bindValue(":mask", defaultMask);
 
     if (!query.exec()) {
         qCritical() << "错误: 初始化排班失败 " << query.lastError().text();
@@ -63,9 +67,9 @@ QMap<QString, int> ScheduleDao::getScheduleRange(QSqlDatabase db, int doctorId, 
 
 bool ScheduleDao::isSlotAvailable(QSqlDatabase db, int doctorId, QDate date, int slotIndex) {
     // 严格边界检查
-    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+    if (slotIndex < 0 || slotIndex >= TIME_SLOT_COUNT) {
         qWarning() << "isSlotAvailable: 索引越界 " << slotIndex;
-        return false; // 越界视为不可用
+        return false;
     }
 
     int flags = getScheduleFlag(db, doctorId, date);
@@ -79,7 +83,7 @@ bool ScheduleDao::isSlotAvailable(QSqlDatabase db, int doctorId, QDate date, int
 
 bool ScheduleDao::occupySlot(QSqlDatabase db, int doctorId, QDate date, int slotIndex) {
     // 严格边界检查
-    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+    if (slotIndex < 0 || slotIndex >= TIME_SLOT_COUNT) {
         qCritical() << "occupySlot: 索引越界 " << slotIndex;
         return false;
     }
@@ -108,7 +112,7 @@ bool ScheduleDao::occupySlot(QSqlDatabase db, int doctorId, QDate date, int slot
 
 bool ScheduleDao::releaseSlot(QSqlDatabase db, int doctorId, QDate date, int slotIndex) {
     // 严格边界检查
-    if (slotIndex < 0 || slotIndex > MAX_TIME_SLOT_INDEX) {
+    if (slotIndex < 0 || slotIndex >= TIME_SLOT_COUNT) {
         qCritical() << "releaseSlot: 索引越界 " << slotIndex;
         return false;
     }

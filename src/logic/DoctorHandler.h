@@ -31,13 +31,6 @@ public:
     static void handleGetDoctorDetail(ClientSocket* sender, const QJsonObject& request);
 
     /**
-     * @brief 处理学生端获取医生列表请求
-     * @param sender 请求发送者（ClientSocket）
-     * @param request 请求JSON对象
-     */
-    static void handleStudentGetDoctorList(ClientSocket* sender, const QJsonObject& request);
-
-    /**
      * @brief 处理医生获取预约列表请求
      * @param sender 请求发送者（ClientSocket）
      * @param request 请求JSON对象

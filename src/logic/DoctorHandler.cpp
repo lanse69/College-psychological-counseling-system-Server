@@ -24,14 +24,18 @@ struct OpResult {
 
 void DoctorHandler::handleGetDoctorList(ClientSocket* sender, const QJsonObject& request)
 {
+    // 获取请求中的 CMD
+    int reqCmd = request[JsonKeys::CMD].toInt();
+
     // 获取医生列表
     AsyncExecutor::run(sender,
         [](QSqlDatabase db) -> QJsonArray {
             return UserDao::getDoctorList(db);
         },
         // 主线程回调
-        [sender](QJsonArray doctorList) {
-            sendSuccessResponse(sender, (int)CmdType::GET_DOCTOR_LIST, doctorList, "获取医生列表成功");
+        [sender, reqCmd](QJsonArray doctorList) {
+            // 使用请求时的 CMD 进行回复
+            sendSuccessResponse(sender, reqCmd, doctorList, "获取医生列表成功");
         }
     );
 }
@@ -62,20 +66,6 @@ void DoctorHandler::handleGetDoctorDetail(ClientSocket* sender, const QJsonObjec
                 // 如果返回空，说明不存在或查询失败
                 sendErrorResponse(sender, (int)CmdType::GET_DOCTOR_DETAIL, (int)StatusCode::NOT_FOUND, "医生不存在或查询失败");
             }
-        }
-    );
-}
-
-void DoctorHandler::handleStudentGetDoctorList(ClientSocket* sender, const QJsonObject& request)
-{
-    // 获取医生列表
-    AsyncExecutor::run(sender,
-        [](QSqlDatabase db) -> QJsonArray {
-            return UserDao::getDoctorList(db);
-        },
-        // 主线程回调
-        [sender](QJsonArray doctorList) {
-            sendSuccessResponse(sender, (int)CmdType::STUDENT_GET_DOCTOR_LIST, doctorList, "获取医生列表成功");
         }
     );
 }
